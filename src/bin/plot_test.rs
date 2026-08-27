@@ -43,8 +43,12 @@ fn main() -> io::Result<()> {
     let points: Vec<Point> = rangef(0.0, TAU, 400)
         .into_iter()
         .map(|t| Point {
-            x: 3.0 * (3.0 * t).sin(),
-            y: 3.0 * (2.0 * t).sin(),
+            x: 0.2 * 16.0 * t.sin().powi(3),
+            y: 0.2
+                * (13.0 * t.cos()
+                    - 5.0 * (2.0 * t).cos()
+                    - 2.0 * (3.0 * t).cos()
+                    - (4.0 * t).cos()),
         })
         .collect();
 
