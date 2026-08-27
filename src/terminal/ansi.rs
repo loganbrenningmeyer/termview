@@ -26,6 +26,9 @@ pub const ALT_SCREEN_LEAVE: &str = "\x1b[?1049l";
 pub const SYNC_BEGIN: &str = "\x1b[?2026h";
 pub const SYNC_END: &str = "\x1b[?2026l";
 
+// Default color 
+pub const DEFAULT_COLOR: &str = "\x1b[39m";
+
 // Take over the screen: alternate buffer, no cursor, cleared.
 pub fn enter_fullscreen(out: &mut impl Write) -> io::Result<()> {
     write!(out, "{ALT_SCREEN_ENTER}{CURSOR_HIDE}{CLEAR_SCREEN}")?;

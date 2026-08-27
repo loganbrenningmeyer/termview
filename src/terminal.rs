@@ -8,6 +8,7 @@ pub use ansi::{
     CURSOR_HIDE,
     CURSOR_HOME,
     CURSOR_SHOW,
+    DEFAULT_COLOR,
     SYNC_BEGIN,
     SYNC_END,
     enter_fullscreen,
@@ -15,4 +16,4 @@ pub use ansi::{
     move_cursor,
     present,
 };
-pub use presenter::TerminalPresenter;
+pub use presenter::{canvas_dims, TerminalPresenter};

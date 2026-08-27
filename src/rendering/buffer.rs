@@ -1,17 +1,32 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Color {
+    Default,
+    Rgb(u8, u8, u8),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Cell {
     pub ch: char,
+    pub fg: Color,
 }
 
 impl Cell {
     pub const fn new(ch: char) -> Self {
-        Self { ch }
+        Self {
+            ch,
+            fg: Color::Default,
+        }
+    }
+
+    pub const fn with_fg(mut self, fg: Color) -> Self {
+        self.fg = fg;
+        self
     }
 }
 
 impl Default for Cell {
-    fn default() -> Self { 
-        Self { ch: ' ' }
+    fn default() -> Self {
+        Self::new(' ')
     }
 }
 

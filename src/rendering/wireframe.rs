@@ -180,8 +180,8 @@ impl Default for WireframeRenderer {
             near: 0.1,
             far: 100.0,
             cell_aspect: 0.5,
-            edge_cell: Cell { ch: '#' },
-            vertex_cell: Cell { ch: '@' },
+            edge_cell: Cell::new('#'),
+            vertex_cell: Cell::new('@'),
         }
     }
 }

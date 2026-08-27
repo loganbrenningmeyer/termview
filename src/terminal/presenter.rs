@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 
-use crate::rendering::Buffer;
-use super::{move_cursor, SYNC_BEGIN, SYNC_END};
+use crate::rendering::{Buffer, Color};
+use super::{move_cursor, DEFAULT_COLOR, SYNC_BEGIN, SYNC_END};
 
 
 pub struct TerminalPresenter {
@@ -52,6 +52,8 @@ impl TerminalPresenter {
         let height = self.back.height();
         let width  = self.back.width();
 
+        let mut active_color = None;
+
         for y in 0..height {
             let mut x = 0;
 
@@ -80,11 +82,28 @@ impl TerminalPresenter {
                 // Write all changed cells in diff run
                 for run_x in run_start..x {
                     let cell = self.back.get(run_x, y);
+                    
+                    // Push character with color
+                    if active_color != Some(cell.fg) {
+                        use std::fmt::Write as _;
+
+                        match cell.fg {
+                            Color::Default => self.output.push_str(DEFAULT_COLOR),
+                            Color::Rgb(r, g, b) => {
+                                write!(self.output, "\x1b[38;2;{r};{g};{b}m")
+                                    .expect("writing to String cannot fail");
+                            }
+                        }
+
+                        active_color = Some(cell.fg);
+                    }
+
                     self.output.push(cell.ch);
                 } 
             }
         }
 
+        self.output.push_str(DEFAULT_COLOR);
         self.output.push_str(SYNC_END);
 
         // Execute output string cursor commands / character writes
@@ -101,4 +120,16 @@ impl TerminalPresenter {
         self.front = Buffer::new(width, height);
         self.back = Buffer::new(width, height);
     }
+}
+
+// terminal size, else the fallback.
+pub fn canvas_dims() -> (usize, usize) {
+    let (tw, th) = terminal_size::terminal_size()
+        .map(|(w, h)| (w.0 as usize, h.0 as usize))
+        .unwrap_or((100, 40));
+
+    (
+        tw, 
+        th.saturating_sub(1),
+    )
 }
