@@ -6,12 +6,10 @@ mod config;
 use config::AppConfig;
 
 use termview::{
-    camera::Camera,
-    canvas::Canvas,
     geometry::{Mesh, Object},
     math::{Quaternion, Transform, Vec3},
-    renderer::Renderer,
-    term,
+    rendering::{Camera, WireframeRenderer},
+    terminal::{self as term, TerminalPresenter},
 };
 
 /// Mesh::cube() puts its vertices at +/-0.5 on each axis, so its corners sit
@@ -33,7 +31,7 @@ const SPINS: [([f64; 3], f64); 5] = [
 /**
  * Transform placing an object on the X axis at the world origin's height,
  * with rotation left at identity — the animation loop overwrites it each
- * frame. All three Transform fields are Option, so each needs Some().
+ * frame.
  */
 fn placed_at(x: f64, scale: f64) -> Transform {
     Transform {
@@ -48,13 +46,12 @@ fn main() -> io::Result<()> {
 
     let (width, height) = cfg.canvas_dims();
 
-    // Setup Canvas / print buffer
-    let mut canvas = Canvas::new(width, height);
-    let mut frame = String::with_capacity((width + 1) * height);
+    // Setup front / back buffers and terminal presenter
+    let mut presenter = TerminalPresenter::new(width, height);
 
     let mut out = io::stdout().lock();
 
-    let renderer = Renderer {
+    let renderer = WireframeRenderer {
         ..Default::default()
     };
 
@@ -112,11 +109,12 @@ fn main() -> io::Result<()> {
             );
         }
 
-        canvas.clear();
-        renderer.render(&objects, &camera, &mut canvas);
+        {
+            let buffer = presenter.begin_frame();
+            renderer.render(&objects, &camera, buffer);
+        }
 
-        canvas.write_to(&mut frame);
-        term::present(&mut out, &frame)?;
+        presenter.present(&mut out)?;
         thread::sleep(frame_time.saturating_sub(frame_start.elapsed()));
     }
 }

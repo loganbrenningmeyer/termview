@@ -1,18 +1,24 @@
 use crate::{
-    camera::Camera, 
-    canvas::Canvas, 
     geometry::{Object, Vertex}, 
     math::{Mat4, Vec4},
-    projection::PerspectiveProjection,
+};
+use super::{
+    Buffer, 
+    Camera, 
+    Cell,
+    PerspectiveProjection
+};
+use super::{
+    draw_line,
 };
 
-pub struct Renderer {
+pub struct WireframeRenderer {
     pub fov_y: f64,
     pub near: f64,
     pub far: f64,
     pub cell_aspect: f64,
-    pub edge_char: char,
-    pub vertex_char: char,
+    pub edge_cell: Cell,
+    pub vertex_cell: Cell,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -35,25 +41,25 @@ pub struct ScreenPoint {
  * for each edge
  *      draw line between projected endpoints
  */
-impl Renderer {
+impl WireframeRenderer {
     /**
      * Frame entry point. Compute camera view matrix per-frame,
      * not per-object. 
      * - Computes model-view-projection matrices for each object
      *      MVP = projection * view * model (reverse application)
      * - Projects vertices onto 2D screen
-     * - Draws vertices / edges onto Canvas
+     * - Draws vertices / edges onto buffer
      */
     pub fn render(
         &self,
         objects: &[Object],
         camera: &Camera,
-        canvas: &mut Canvas,
+        buffer: &mut Buffer,
     ) {
         // Define perspective projection matrix / view matrix
         let proj_mat = PerspectiveProjection {
             fov_y: self.fov_y,
-            aspect: canvas.aspect() * self.cell_aspect,
+            aspect: buffer.aspect() * self.cell_aspect,
             near: self.near,
             far: self.far,
         }.matrix();
@@ -73,7 +79,7 @@ impl Renderer {
                 .map(|v| self.project_vertex(
                     v, 
                     &mvp, 
-                    canvas,
+                    buffer,
                 ))
                 .collect();
 
@@ -83,13 +89,13 @@ impl Renderer {
                 if let (Some(a), Some(b)) =
                     (proj_verts[edge.idx0], proj_verts[edge.idx1])
                 {
-                    self.render_edge(&a, &b, canvas);
+                    self.render_edge(&a, &b, buffer);
                 }
             }
 
             // Set vertex characters on Canvas
             for p in proj_verts.iter().flatten() {
-                canvas.set(p.x, p.y, self.vertex_char);
+                buffer.set(p.x, p.y, self.vertex_cell);
             }
         }
     }
@@ -105,7 +111,7 @@ impl Renderer {
         &self,
         vertex: &Vertex,
         mvp: &Mat4,
-        canvas: &Canvas,
+        buffer: &Buffer,
     ) -> Option<ScreenPoint> {
         // Transform object-space → clip-space
         let clip = *mvp * Vec4 {
@@ -137,8 +143,8 @@ impl Renderer {
         let ndc_y_norm = (1.0 - ndc_y) * 0.5;
 
         // [0, 1] NDC to screen coordinates
-        let screen_x = ndc_x_norm * canvas.width() as f64;
-        let screen_y = ndc_y_norm * canvas.height() as f64;
+        let screen_x = ndc_x_norm * buffer.width() as f64;
+        let screen_y = ndc_y_norm * buffer.height() as f64;
 
         Some(ScreenPoint {
             x: screen_x.floor() as isize,
@@ -148,33 +154,34 @@ impl Renderer {
     }
 
     /**
-     * Call to Canvas to render edge between two ScreenPoints
+     * Render edge between two ScreenPoints onto Buffer
      */
     fn render_edge(
         &self,
         a: &ScreenPoint,
         b: &ScreenPoint,
-        canvas: &mut Canvas,
+        buffer: &mut Buffer,
     ) {
-        canvas.draw_line(
+        draw_line(
+            buffer,
             a.x, 
             a.y, 
             b.x,
             b.y, 
-            self.edge_char,
+            self.edge_cell,
         );
     }
 }
 
-impl Default for Renderer {
+impl Default for WireframeRenderer {
     fn default() -> Self {
-        Renderer {
+        WireframeRenderer {
             fov_y: 50.0,
             near: 0.1,
             far: 100.0,
             cell_aspect: 0.5,
-            edge_char: '#',
-            vertex_char: '@',
+            edge_cell: Cell { ch: '#' },
+            vertex_cell: Cell { ch: '@' },
         }
     }
 }

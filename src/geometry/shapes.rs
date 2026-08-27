@@ -1,4 +1,5 @@
-use crate::geometry::{Edge, Mesh, Vertex};
+use super::{Edge, Mesh, Vertex};
+
 
 impl Mesh {
     pub fn cube() -> Self {

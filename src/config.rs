@@ -1,7 +1,5 @@
 use std::time::Duration;
 
-use termview::canvas::Canvas;
-
 pub struct AppConfig {
     pub width: Option<usize>,
     pub height: Option<usize>,
@@ -29,11 +27,13 @@ impl AppConfig {
 
     /// Explicit config wins, else terminal size, else the fallback.
     pub fn canvas_dims(&self) -> (usize, usize) {
-        let (tw, th) = Canvas::terminal_dims();
+        let (tw, th) = terminal_size::terminal_size()
+            .map(|(w, h)| (w.0 as usize, h.0 as usize))
+            .unwrap_or((100, 40));
+
         (
             self.width.unwrap_or(tw),
             self.height.unwrap_or(th.saturating_sub(1)),
         )
     }
 }
-
