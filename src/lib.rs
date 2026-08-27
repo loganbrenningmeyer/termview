@@ -5,3 +5,4 @@ pub mod projection;
 pub mod renderer;
 pub mod canvas;
 pub mod term;
+pub mod shapes;
