@@ -16,4 +16,4 @@ pub use ansi::{
     move_cursor,
     present,
 };
-pub use presenter::{canvas_dims, TerminalPresenter};
+pub use presenter::{canvas_dims, canvas_viewport_dims, TerminalPresenter};

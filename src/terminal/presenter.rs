@@ -1,6 +1,6 @@
 use std::io::{self, Write};
 
-use crate::rendering::{Buffer, Color};
+use crate::rendering::{Buffer, Color, PlotViewport};
 use super::{move_cursor, DEFAULT_COLOR, SYNC_BEGIN, SYNC_END};
 
 
@@ -132,4 +132,38 @@ pub fn canvas_dims() -> (usize, usize) {
         tw, 
         th.saturating_sub(1),
     )
+}
+
+pub fn canvas_viewport_dims(
+    viewport: &PlotViewport,
+    cell_aspect: f64,
+) -> (usize, usize) {
+    let (tw, th) = canvas_dims();
+
+    let x_range = (viewport.x_max - viewport.x_min).abs();
+    let y_range = (viewport.y_max - viewport.y_min).abs();
+
+    if x_range <= f64::EPSILON
+        || y_range <= f64::EPSILON
+        || cell_aspect <= 0.0
+    {
+        return (tw, th);
+    }
+
+    let viewport_aspect = x_range / y_range;
+
+    // Required column-to-row ratio. For a square viewport and cells
+    // that are half as wide as tall, we need twice as many columns.
+    let target_cell_aspect = viewport_aspect / cell_aspect;
+    let available_cell_aspect = tw as f64 / th as f64;
+
+    if available_cell_aspect > target_cell_aspect {
+        let height = th;
+        let width = (height as f64 * target_cell_aspect).round() as usize;
+        (width, height)
+    } else {
+        let width = tw;
+        let height = (width as f64 / target_cell_aspect).round() as usize;
+        (width, height)
+    }
 }

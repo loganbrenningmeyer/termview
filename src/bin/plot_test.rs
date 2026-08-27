@@ -1,14 +1,23 @@
-use std::io::self;
+use std::io;
 
 use termview::{
     geometry::Point,
-    rendering::{Cell, Color, PlotRenderer, PlotViewport},
-    terminal::{self as term, TerminalPresenter},
     math::rangef,
+    rendering::{Color, PlotAspect, PlotRenderer, PlotStyle, PlotViewport},
+    terminal::{self as term, TerminalPresenter},
 };
 
 fn main() -> io::Result<()> {
-    let (width, height) = term::canvas_dims();
+    let viewport = PlotViewport {
+        x_min: -4.0,
+        x_max: 4.0,
+        y_min: -4.0,
+        y_max: 4.0,
+    };
+
+    let cell_aspect = 0.5;
+
+    let (width, height) = term::canvas_viewport_dims(&viewport, cell_aspect);
 
     let mut presenter = TerminalPresenter::new(width, height);
 
@@ -17,28 +26,25 @@ fn main() -> io::Result<()> {
     let plot_color = Color::Rgb(80, 220, 120);
     let ticks_color = Color::Rgb(220, 220, 160);
 
+    let style = PlotStyle::default()
+        .curve_color(plot_color)
+        .tick_color(ticks_color);
+
     let renderer = PlotRenderer {
-        line_cell: Cell::new('*').with_fg(plot_color),
-        point_cell: Cell::new('@').with_fg(plot_color),
-
-        ticks_color: ticks_color,
-
-        pad_width: 0,
+        style,
+        aspect: PlotAspect::Equal { cell_aspect },
+        pad_width: 5,
         pad_height: 5,
         ..Default::default()
     };
 
-    let viewport = PlotViewport {
-        x_min: -10.0,
-        x_max: 10.0,
-        y_min: -1.0,
-        y_max: 1.0,
-    };
+    use std::f64::consts::TAU;
 
-    let points: Vec<Point> = rangef(-10.0, 10.0, 50).into_iter()
-        .map(|n| Point {
-            x: n,
-            y: n.sin(),
+    let points: Vec<Point> = rangef(0.0, TAU, 400)
+        .into_iter()
+        .map(|t| Point {
+            x: 3.0 * (3.0 * t).sin(),
+            y: 3.0 * (2.0 * t).sin(),
         })
         .collect();
 
@@ -48,7 +54,7 @@ fn main() -> io::Result<()> {
     renderer.render(&points, &viewport, buffer);
 
     presenter.present(&mut out)?;
-    
+
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;
 

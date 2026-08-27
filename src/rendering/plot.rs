@@ -1,30 +1,134 @@
-use crate::{
-    geometry::Point,
-};
 use super::{Buffer, Cell, Color};
-use super::{
-    draw_axes_2d, 
-    draw_axes_ticks, 
-    draw_border,
-    draw_line, 
-    draw_point,
-};
+use super::{draw_axes_2d, draw_axes_ticks, draw_border, draw_line, draw_point};
+use crate::geometry::Point;
 
+#[derive(Debug, Clone, Copy)]
+pub struct PlotStyle {
+    pub point: Cell,
+    pub line: Cell,
+    pub x_axis: Cell,
+    pub y_axis: Cell,
+    pub x_tick: Cell,
+    pub y_tick: Cell,
+    pub tick_color: Color,
+    pub border_color: Color,
+}
+
+impl PlotStyle {
+    pub const fn curve_color(mut self, color: Color) -> Self {
+        self.point = self.point.with_fg(color);
+        self.line = self.line.with_fg(color);
+        self
+    }
+
+    pub const fn axis_color(mut self, color: Color) -> Self {
+        self.x_axis = self.x_axis.with_fg(color);
+        self.y_axis = self.y_axis.with_fg(color);
+        self
+    }
+
+    pub const fn tick_color(mut self, color: Color) -> Self {
+        self.x_tick = self.x_tick.with_fg(color);
+        self.y_tick = self.y_tick.with_fg(color);
+        self.tick_color = color;
+        self
+    }
+
+    pub const fn border_color(mut self, color: Color) -> Self {
+        self.border_color = color;
+        self
+    }
+}
+
+impl Default for PlotStyle {
+    fn default() -> Self {
+        let axis_color = Color::Rgb(120, 120, 120);
+
+        Self {
+            point: Cell::new('@'),
+            line: Cell::new('*'),
+            x_axis: Cell::new('─').with_fg(axis_color),
+            y_axis: Cell::new('│').with_fg(axis_color),
+            x_tick: Cell::new('┼').with_fg(axis_color),
+            y_tick: Cell::new('┼').with_fg(axis_color),
+            tick_color: Color::Rgb(220, 220, 80),
+            border_color: Color::Default,
+        }
+    }
+}
 
 pub struct PlotRenderer {
-    pub point_cell: Cell,
-    pub line_cell: Cell,
-    pub x_axis_cell: Cell,
-    pub y_axis_cell: Cell,
-    pub x_tick_cell: Cell,
-    pub y_tick_cell: Cell,
+    pub style: PlotStyle,
+    pub aspect: PlotAspect,
     pub pad_width: usize,
     pub pad_height: usize,
     pub show_axes: bool,
     pub show_ticks: bool,
     pub num_ticks: usize,
-    pub ticks_color: Color,
     pub show_border: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum PlotAspect {
+    Auto,
+    Equal { cell_aspect: f64 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlotArea {
+    pub left: isize,
+    pub right: isize,
+    pub top: isize,
+    pub bottom: isize,
+}
+
+impl PlotArea {
+    pub const fn width(self) -> isize {
+        self.right - self.left
+    }
+
+    pub const fn height(self) -> isize {
+        self.bottom - self.top
+    }
+
+    pub fn fit_equal_aspect(
+        self,
+        viewport: &PlotViewport,
+        cell_aspect: f64,
+    ) -> Self {
+        let x_range = viewport.x_max - viewport.x_min;
+        let y_range = viewport.y_max - viewport.y_min;
+
+        let data_aspect = x_range / y_range;
+
+        let area_aspect = self.width() as f64 * cell_aspect / self.height() as f64;
+
+        if area_aspect > data_aspect {
+            // Available area is too wide: reduce and center its width.
+            let new_width =
+                (self.height() as f64 * data_aspect / cell_aspect).round() as isize;
+
+            let offset = (self.width() - new_width) / 2;
+
+            PlotArea {
+                left: self.left + offset,
+                right: self.left + offset + new_width,
+                ..self
+            }
+        } else {
+            // Available area is too tall: reduce and center its height.
+            let new_height =
+                (self.width() as f64 * cell_aspect / data_aspect).round() as isize;
+
+            let offset = (self.height() - new_height) / 2;
+
+            PlotArea {
+                top: self.top + offset,
+                bottom: self.top + offset + new_height,
+                ..self
+            }
+        }
+    }
 }
 
 pub struct PlotViewport {
@@ -39,16 +143,19 @@ impl PlotRenderer {
      * Project / render 2D points into buffer, fitting
      * into viewport dimensions
      */
-    pub fn render(
-        &self,
-        points: &[Point],
-        viewport: &PlotViewport,
-        buffer: &mut Buffer,
-    ) {
+    pub fn render(&self, points: &[Point], viewport: &PlotViewport, buffer: &mut Buffer) {
+        let Some(mut area) = self.plot_area(buffer) else {
+            return;
+        };
+
+        if let PlotAspect::Equal { cell_aspect } = self.aspect {
+            area = area.fit_equal_aspect(viewport, cell_aspect);
+        }
+
         // Project points onto buffer screen coords
         let projected: Vec<_> = points
             .iter()
-            .filter_map(|&point| self.project(point, viewport, buffer))
+            .filter_map(|&point| self.project(point, viewport, area))
             .collect();
 
         // Draw lines between points
@@ -56,36 +163,26 @@ impl PlotRenderer {
             let (x0, y0) = pair[0];
             let (x1, y1) = pair[1];
 
-            draw_line(
-                buffer,
-                x0,
-                y0,
-                x1,
-                y1,
-                self.line_cell,
-            );
+            draw_line(buffer, x0, y0, x1, y1, self.style.line);
         }
 
         // Set point cells in buffer
         // -- Write over line cells at vertices if filled
         for (x, y) in projected {
-            draw_point(buffer, x, y, self.point_cell);
+            draw_point(buffer, x, y, self.style.point);
         }
 
         // Draw x/y axes
         if self.show_axes {
             let origin = Point::new(0.0, 0.0);
-            if let Some((origin_x, origin_y)) = self.project(
-                origin,
-                viewport,
-                buffer,
-            ) {
+            if let Some((origin_x, origin_y)) = self.project(origin, viewport, area) {
                 draw_axes_2d(
-                    buffer, 
-                    origin_x, 
-                    origin_y, 
-                    self.x_axis_cell, 
-                    self.y_axis_cell,
+                    buffer,
+                    area,
+                    origin_x,
+                    origin_y,
+                    self.style.x_axis,
+                    self.style.y_axis,
                 );
             }
         }
@@ -93,28 +190,41 @@ impl PlotRenderer {
         // Draw x/y tick labels
         if self.show_ticks {
             let origin = Point::new(0.0, 0.0);
-            if let Some((origin_x, origin_y)) = self.project(
-                origin,
-                viewport,
-                buffer,
-            ) {
+            if let Some((origin_x, origin_y)) = self.project(origin, viewport, area) {
                 draw_axes_ticks(
-                    buffer, 
+                    buffer,
                     viewport,
-                    origin_x, 
-                    origin_y, 
-                    self.y_axis_cell,
-                    self.x_axis_cell,
+                    area,
+                    origin_x,
+                    origin_y,
+                    self.style.x_tick,
+                    self.style.y_tick,
                     self.num_ticks,
-                    self.ticks_color,
+                    self.style.tick_color,
                 );
             }
         }
 
         // Draw border
         if self.show_border {
-            draw_border(buffer);
+            draw_border(buffer, self.style.border_color);
         }
+    }
+
+    fn plot_area(&self, buffer: &Buffer) -> Option<PlotArea> {
+        let width = isize::try_from(buffer.width()).ok()?;
+        let height = isize::try_from(buffer.height()).ok()?;
+        let pad_width = isize::try_from(self.pad_width).ok()?;
+        let pad_height = isize::try_from(self.pad_height).ok()?;
+
+        let area = PlotArea {
+            left: pad_width,
+            right: width.checked_sub(pad_width + 1)?,
+            top: pad_height,
+            bottom: height.checked_sub(pad_height + 1)?,
+        };
+
+        (area.width() >= 0 && area.height() >= 0).then_some(area)
     }
 
     /**
@@ -124,14 +234,12 @@ impl PlotRenderer {
         &self,
         point: Point,
         viewport: &PlotViewport,
-        buffer: &Buffer,
+        area: PlotArea,
     ) -> Option<(isize, isize)> {
         let x_range = viewport.x_max - viewport.x_min;
         let y_range = viewport.y_max - viewport.y_min;
 
-        if x_range.abs() <= f64::EPSILON ||
-        y_range.abs() <= f64::EPSILON
-        {
+        if x_range.abs() <= f64::EPSILON || y_range.abs() <= f64::EPSILON {
             return None;
         }
 
@@ -139,46 +247,24 @@ impl PlotRenderer {
         let x_norm = (point.x - viewport.x_min) / x_range;
         let y_norm = (point.y - viewport.y_min) / y_range;
 
-        // Map normalized point to buffer screen coordinates
-        // -- top-left (0 + p_w, 0 + p_h) 
-        //      -> bottom-right (W - p_w - 1, H - p_h - 1)
-        // -- width  -= 2 * p_w
-        // -- height -= 2 * p_h
-        let plot_width  = buffer.width()
-            .checked_sub(self.pad_width.checked_mul(2)?)?;
-        let plot_height = buffer.height()
-            .checked_sub(self.pad_height.checked_mul(2)?)?;
+        // Map normalized point into the shared padded plot area.
+        let x_screen = area.left as f64 + x_norm * area.width() as f64;
+        let y_screen = area.top as f64 + (1.0 - y_norm) * area.height() as f64;
 
-        let x_span = plot_width.checked_sub(1)? as f64;
-        let y_span = plot_height.checked_sub(1)? as f64;
-
-        let x_screen = self.pad_width as f64
-            + x_norm * x_span;
-        let y_screen = self.pad_height as f64
-            + (1.0 - y_norm) * y_span;   // flip y for top->bottom
-
-        Some((
-            x_screen.round() as isize, 
-            y_screen.round() as isize,
-        ))
+        Some((x_screen.round() as isize, y_screen.round() as isize))
     }
 }
 
 impl Default for PlotRenderer {
     fn default() -> Self {
-        PlotRenderer {
-            point_cell: Cell::new('@'),
-            line_cell: Cell::new('*'),
-            x_axis_cell: Cell::new('─').with_fg(Color::Rgb(120, 120, 120)),
-            y_axis_cell: Cell::new('│').with_fg(Color::Rgb(120, 120, 120)),
-            x_tick_cell: Cell::new('│').with_fg(Color::Rgb(120, 120, 120)),
-            y_tick_cell: Cell::new('─').with_fg(Color::Rgb(120, 120, 120)),
+        Self {
+            style: PlotStyle::default(),
+            aspect: PlotAspect::Auto,
             pad_width: 0,
             pad_height: 0,
             show_axes: true,
             show_ticks: true,
             num_ticks: 10,
-            ticks_color: Color::Rgb(220, 220, 80),
             show_border: true,
         }
     }

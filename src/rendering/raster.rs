@@ -1,8 +1,6 @@
-use super::{Buffer, Cell, Color, PlotViewport};
+use super::{Buffer, Cell, Color, PlotArea, PlotViewport};
 
-pub fn draw_border(
-    buffer: &mut Buffer,
-) {
+pub fn draw_border(buffer: &mut Buffer, color: Color) {
     // Convert usize to isize safely
     let (Ok(width), Ok(height)) = (
         isize::try_from(buffer.width()),
@@ -13,46 +11,51 @@ pub fn draw_border(
 
     // Vertical
     for y in 0..height {
-        buffer.set(0, y, Cell::new('│'));
-        buffer.set(width - 1, y, Cell::new('│'));
+        buffer.set(0, y, Cell::new('│').with_fg(color));
+        buffer.set(width - 1, y, Cell::new('│').with_fg(color));
     }
 
     // Horizontal
     for x in 0..width {
-        buffer.set(x, 0, Cell::new('─'));
-        buffer.set(x, height - 1, Cell::new('─'));
+        buffer.set(x, 0, Cell::new('─').with_fg(color));
+        buffer.set(x, height - 1, Cell::new('─').with_fg(color));
     }
 
     // Corners
-    buffer.set(0, 0, Cell::new('┌'));
-    buffer.set(width - 1, 0, Cell::new('┐'));
-    buffer.set(0, height - 1, Cell::new('└'));
-    buffer.set(width - 1, height - 1, Cell::new('┘'));
+    buffer.set(0, 0, Cell::new('┌').with_fg(color));
+    buffer.set(width - 1, 0, Cell::new('┐').with_fg(color));
+    buffer.set(0, height - 1, Cell::new('└').with_fg(color));
+    buffer.set(width - 1, height - 1, Cell::new('┘').with_fg(color));
 }
 
-pub fn draw_text(
+fn draw_text_in_area(
     buffer: &mut Buffer,
+    area: PlotArea,
     x: isize,
     y: isize,
     text: &str,
     color: Color,
 ) {
+    if !(area.top..=area.bottom).contains(&y) {
+        return;
+    }
+
     for (offset, ch) in text.chars().enumerate() {
         let Ok(offset) = isize::try_from(offset) else {
             break;
         };
+        let cell_x = x + offset;
 
-        buffer.set(
-            x + offset,
-            y,
-            Cell::new(ch).with_fg(color),
-        );
+        if (area.left..=area.right).contains(&cell_x) {
+            buffer.set(cell_x, y, Cell::new(ch).with_fg(color));
+        }
     }
 }
 
 pub fn draw_axes_ticks(
     buffer: &mut Buffer,
     viewport: &PlotViewport,
+    area: PlotArea,
     origin_x: isize,
     origin_y: isize,
     tick_x: Cell,
@@ -60,13 +63,9 @@ pub fn draw_axes_ticks(
     num_ticks: usize,
     color: Color,
 ) {
-    // Convert usize to isize safely
-    let (Ok(width), Ok(height)) = (
-        isize::try_from(buffer.width()),
-        isize::try_from(buffer.height()),
-    ) else {
+    if num_ticks < 2 {
         return;
-    };
+    }
 
     let x_range = viewport.x_max - viewport.x_min;
     let y_range = viewport.y_max - viewport.y_min;
@@ -75,7 +74,7 @@ pub fn draw_axes_ticks(
     for i in 0..num_ticks {
         let t = i as f64 / (num_ticks - 1) as f64;
 
-        let x_col = (t * (width - 1) as f64).round() as isize;
+        let x_col = area.left + (t * area.width() as f64).round() as isize;
 
         let value = viewport.x_min + t * x_range;
         let label = format!("{value:.2}");
@@ -83,80 +82,66 @@ pub fn draw_axes_ticks(
         // Center the label beneath its tick
         let label_width = isize::try_from(label.chars().count()).unwrap_or(0);
 
-        let label_x = x_col - label_width / 2;
-        let label_y = origin_y + 2;
+        let max_label_x = (area.right - label_width + 1).max(area.left);
+        let label_x = (x_col - label_width / 2).clamp(area.left, max_label_x);
+        let label_y = (origin_y + 1).clamp(area.top, area.bottom);
 
-        draw_text(
-            buffer,
-            label_x,
-            label_y,
-            &label,
-            color,
-        );
+        draw_text_in_area(buffer, area, label_x, label_y, &label, color);
 
-        buffer.set(label_x, origin_y, tick_x);
+        buffer.set(x_col, origin_y, tick_x);
     }
 
     // Y-ticks
     for i in 0..num_ticks {
         let t = i as f64 / (num_ticks - 1) as f64;
 
-        let y_row = (t * (height - 1) as f64).round() as isize;
+        let y_row = area.top + (t * area.height() as f64).round() as isize;
 
         let value = viewport.y_max - t * y_range;
         let label = format!("{value:.2}");
 
-        let label_x = origin_x + 2;
+        // Put to the left of the axis
+        let label_width = isize::try_from(label.chars().count()).unwrap_or(0);
+        let max_label_x = (area.right - label_width + 1).max(area.left);
+        let label_x = (origin_x - label_width - 1).clamp(area.left, max_label_x);
 
-        draw_text(
-            buffer,
-            label_x,
-            y_row,
-            &label,
-            color,
-        );
+        draw_text_in_area(buffer, area, label_x, y_row, &label, color);
 
         buffer.set(origin_x, y_row, tick_y);
     }
 
     // Draw origin label
-    buffer.set(origin_x + 1, origin_y + 1, Cell::new('0'));
+    let origin_label_x = (origin_x - 1).clamp(area.left, area.right);
+    let origin_label_y = (origin_y + 1).clamp(area.top, area.bottom);
+    buffer.set(
+        origin_label_x,
+        origin_label_y,
+        Cell::new('0').with_fg(color),
+    );
 }
 
 pub fn draw_axes_2d(
     buffer: &mut Buffer,
+    area: PlotArea,
     origin_x: isize,
     origin_y: isize,
     cell_x: Cell,
     cell_y: Cell,
 ) {
-    // Convert usize to isize safely
-    let (Ok(width), Ok(height)) = (
-        isize::try_from(buffer.width()),
-        isize::try_from(buffer.height()),
-    ) else {
-        return;
-    };
-
-    if (0..height).contains(&origin_y) {
-        for x in 0..width {
+    if (area.top..=area.bottom).contains(&origin_y) {
+        for x in area.left..=area.right {
             buffer.set(x, origin_y, cell_x);
         }
     }
-    
-    if (0..width).contains(&origin_x) {
-        for y in 0..height {
+
+    if (area.left..=area.right).contains(&origin_x) {
+        for y in area.top..=area.bottom {
             buffer.set(origin_x, y, cell_y);
         }
     }
 }
 
-pub fn draw_point(
-    buffer: &mut Buffer,
-    x: isize,
-    y: isize,
-    cell: Cell,
-) {
+pub fn draw_point(buffer: &mut Buffer, x: isize, y: isize, cell: Cell) {
     buffer.set(x, y, cell);
 }
 
@@ -164,14 +149,7 @@ pub fn draw_point(
  * Bresenham's line algorithm for efficiently drawing lines between
  * points in the terminal
  */
-pub fn draw_line(
-    buffer: &mut Buffer,
-    x0: isize,
-    y0: isize,
-    x1: isize,
-    y1: isize,
-    cell: Cell,
-) {
+pub fn draw_line(buffer: &mut Buffer, x0: isize, y0: isize, x1: isize, y1: isize, cell: Cell) {
     let mut x0_ = x0;
     let mut y0_ = y0;
 
