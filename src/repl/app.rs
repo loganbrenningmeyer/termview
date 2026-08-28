@@ -1,5 +1,10 @@
 use std::io::{self, Write};
 
+use crossterm::{
+    event::{self, Event, KeyCode, KeyEventKind},
+    terminal::{disable_raw_mode, enable_raw_mode},
+};
+
 use crate::geometry::{Object, Point};
 use crate::terminal::{self as term, TerminalPresenter};
 use super::{Command, Session, SessionOutput};
@@ -111,18 +116,79 @@ impl TermviewApp {
             term::CURSOR_HOME,
         )?;
 
-        let buffer = self.presenter.begin_frame();
-        self.session.render_3d(surface, buffer);
-        self.presenter.present(output)?;
+        enable_raw_mode()?;
 
-        write!(
+        let view_result = self.run_plot3d_view(surface, output);
+        let raw_mode_result = disable_raw_mode();
+
+        // Restore the prompt row even if rendering or input failed.
+        let cursor_result = write!(
             output,
             "\x1b[{};1H{}",
             height + 1,
             term::CURSOR_SHOW,
-        )?;
+        );
+        let flush_result = output.flush();
 
-        output.flush()
+        view_result?;
+        raw_mode_result?;
+        cursor_result?;
+        flush_result
+    }
+
+    fn run_plot3d_view(
+        &mut self,
+        surface: &Object,
+        output: &mut impl Write,
+    ) -> io::Result<()> {
+        self.draw_plot3d(surface, output)?;
+
+        loop {
+            let Event::Key(key) = event::read()? else {
+                continue;
+            };
+
+            if key.kind == KeyEventKind::Release {
+                continue;
+            }
+
+            let changed = match key.code {
+                KeyCode::Left => {
+                    self.session.orbit_camera_3d(-5.0, 0.0);
+                    true
+                }
+                KeyCode::Right => {
+                    self.session.orbit_camera_3d(5.0, 0.0);
+                    true
+                }
+                KeyCode::Up => {
+                    self.session.orbit_camera_3d(0.0, 5.0);
+                    true
+                }
+                KeyCode::Down => {
+                    self.session.orbit_camera_3d(0.0, -5.0);
+                    true
+                }
+                KeyCode::Esc | KeyCode::Char('q') => break,
+                _ => false,
+            };
+
+            if changed {
+                self.draw_plot3d(surface, output)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn draw_plot3d(
+        &mut self,
+        surface: &Object,
+        output: &mut impl Write,
+    ) -> io::Result<()> {
+        let buffer = self.presenter.begin_frame();
+        self.session.render_3d(surface, buffer);
+        self.presenter.present(output)
     }
 }
 

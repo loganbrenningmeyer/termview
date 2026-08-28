@@ -43,6 +43,9 @@ pub struct Session {
     viewport_3d: PlotViewport3d,
     renderer_3d: Plot3dRenderer,
     camera_3d: Camera,
+    camera_azimuth: f64,
+    camera_elevation: f64,
+    camera_distance: f64,
     transform_3d: Transform,
     samples_3d: (usize, usize),
 
@@ -50,6 +53,22 @@ pub struct Session {
 }
 
 impl Session {
+    pub fn orbit_camera_3d(
+        &mut self,
+        azimuth_delta: f64,
+        elevation_delta: f64,
+    ) {
+        self.camera_azimuth += azimuth_delta;
+        self.camera_elevation =
+            (self.camera_elevation + elevation_delta).clamp(-85.0, 85.0);
+
+        self.camera_3d.update_camera_3d(
+            self.camera_azimuth,
+            self.camera_elevation,
+            self.camera_distance,
+        );
+    }
+
     pub fn execute(&mut self, command: Command) -> Result<SessionOutput, String> {
         match command {
             Command::Plot(expression) => {
@@ -432,6 +451,9 @@ impl Default for Session {
             viewport_3d: PlotViewport3d::default(),
             renderer_3d: Plot3dRenderer::default(),
             camera_3d: Camera::default(),
+            camera_azimuth: 45.0,
+            camera_elevation: 25.0,
+            camera_distance: 10.0,
             transform_3d: Transform::default(),
             samples_3d: (10, 10),
 

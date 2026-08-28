@@ -37,8 +37,8 @@ impl Default for PlotViewport3d {
             x_max: 3.0,
             y_min: -3.0,
             y_max: 3.0,
-            z_min: -2.0,
-            z_max: 2.0,
+            z_min: -3.0,
+            z_max: 3.0,
         }
     }
 }
@@ -47,8 +47,8 @@ impl Default for Plot3dStyle {
     fn default() -> Self {
         Self {
             surface: WireframeStyle {
-                edge: Cell::new('·').with_fg(Color::Rgb(120, 200, 220)),
-                vertex: Cell::new('·').with_fg(Color::Rgb(160, 220, 235)),
+                edge: Cell::new('•').with_fg(Color::Rgb(80, 160, 190)),
+                vertex: Cell::new('●').with_fg(Color::Rgb(170, 230, 245)),
             },
             axes: Axes3dStyle::default(),
             border: Color::Rgb(160, 160, 160),
