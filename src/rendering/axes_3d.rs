@@ -1,4 +1,4 @@
-use super::{Buffer, Camera, Cell, Color, PlotViewport3d, WireframeStyle};
+use super::{BrailleBuffer, Buffer, Camera, Cell, Color, PlotViewport3d, WireframeStyle};
 use crate::{
     geometry::{Edge, Mesh, Object, Vertex}, 
     math::{Transform, Vec3}, 
@@ -38,19 +38,19 @@ impl Default for Axes3dStyle {
     fn default() -> Self {
         Self {
             x: WireframeStyle {
-                edge: Cell::new('━').with_fg(Color::Rgb(255, 80, 80)),
-                vertex: Cell::new('●').with_fg(Color::Rgb(255, 80, 80)),
+                edge: Cell::new('·').with_fg(Color::Rgb(190, 90, 100)),
+                vertex: Cell::new('•').with_fg(Color::Rgb(190, 90, 100)),
             },
             y: WireframeStyle {
-                edge: Cell::new('━').with_fg(Color::Rgb(80, 255, 120)),
-                vertex: Cell::new('●').with_fg(Color::Rgb(80, 255, 120)),
+                edge: Cell::new('·').with_fg(Color::Rgb(90, 180, 120)),
+                vertex: Cell::new('•').with_fg(Color::Rgb(90, 180, 120)),
             },
             z: WireframeStyle {
-                edge: Cell::new('━').with_fg(Color::Rgb(80, 140, 255)),
-                vertex: Cell::new('●').with_fg(Color::Rgb(80, 140, 255)),
+                edge: Cell::new('·').with_fg(Color::Rgb(90, 130, 200)),
+                vertex: Cell::new('•').with_fg(Color::Rgb(90, 130, 200)),
             },
-            tick: Cell::new('.').with_fg(Color::Rgb(170, 170, 170)),
-            label: Cell::new(' ').with_fg(Color::Rgb(220, 220, 220)),
+            tick: Cell::new('.').with_fg(Color::Rgb(125, 125, 135)),
+            label: Cell::new(' ').with_fg(Color::Rgb(205, 205, 215)),
         }
     }
 }
@@ -60,8 +60,8 @@ impl Default for Axes3dRenderer {
         Self {
             show_ticks: true,
             show_labels: true,
-            ticks_per_axis: 5,
-            tick_radius: 1.0,
+            ticks_per_axis: 3,
+            tick_radius: 0.75,
             label_gap: 1.0,
         }
     }
@@ -69,8 +69,8 @@ impl Default for Axes3dRenderer {
 
 impl Axes3dRenderer {
     /**
-     * Using WireframeRenderer, plots each 3D axis as a wireframe
-     * with two vertices and one edge, using the appropriate axis style
+     * Using WireframeRenderer, plots each 3D axis as a Braille wireframe
+     * with two vertices and one edge, using the appropriate axis style.
      */
     pub fn render(
         &self,
@@ -81,10 +81,32 @@ impl Axes3dRenderer {
         style: Axes3dStyle,
         buffer: &mut Buffer,
     ) {
-        // -------------------------
-        // Define X, Y, Z axes
-        // -------------------------
-        let axes = [
+        let display_aspect = buffer.display_aspect();
+        let mut braille = BrailleBuffer::new(buffer.width(), buffer.height());
+
+        self.render_lines_braille(
+            wireframe,
+            viewport,
+            transform,
+            camera,
+            style,
+            display_aspect,
+            &mut braille,
+        );
+        braille.composite(buffer);
+
+        self.render_annotations(
+            wireframe,
+            viewport,
+            transform,
+            camera,
+            style,
+            buffer,
+        );
+    }
+
+    fn axis_specs(viewport: &PlotViewport3d, style: Axes3dStyle) -> [AxisSpec; 3] {
+        [
             AxisSpec {
                 direction: Vec3::X,
                 min: viewport.x_min,
@@ -112,60 +134,74 @@ impl Axes3dRenderer {
                 tick_style: style.tick,
                 label_style: style.label,
             },
-        ];
+        ]
+    }
 
-        // -------------------------
-        // Render axes / ticks / labels 
-        // -------------------------
-        for axis in axes {
-            self.render_axis(
+    pub(crate) fn render_lines_braille(
+        &self,
+        wireframe: &WireframeRenderer,
+        viewport: &PlotViewport3d,
+        transform: Transform,
+        camera: &Camera,
+        style: Axes3dStyle,
+        display_aspect: f64,
+        braille: &mut BrailleBuffer,
+    ) {
+        for (index, axis) in Self::axis_specs(viewport, style).into_iter().enumerate() {
+            let start = axis.direction * axis.min;
+            let end = axis.direction * axis.max;
+            let object = self.make_axis(start, end, transform);
+
+            wireframe.render_braille_into(
+                std::slice::from_ref(&object),
+                camera,
+                axis.style,
+                display_aspect,
+                index as u8 + 1,
+                braille,
+            );
+        }
+    }
+
+    pub(crate) fn render_annotations(
+        &self,
+        wireframe: &WireframeRenderer,
+        viewport: &PlotViewport3d,
+        transform: Transform,
+        camera: &Camera,
+        style: Axes3dStyle,
+        buffer: &mut Buffer,
+    ) {
+        let mut origin_label_drawn = false;
+
+        for axis in Self::axis_specs(viewport, style) {
+            self.render_axis_annotations(
                 wireframe,
                 axis,
                 transform,
                 camera,
+                &mut origin_label_drawn,
                 buffer,
             );
         }
-
     }
 
-    /**
-     * Render axis as wireframe defined by two endpoint vertices
-     * connected by an edge with a transform / projection applied
-     */
-    fn render_axis(
+    fn render_axis_annotations(
         &self,
         wireframe: &WireframeRenderer,
         axis: AxisSpec,
         transform: Transform,
         camera: &Camera,
+        origin_label_drawn: &mut bool,
         buffer: &mut Buffer,
     ) {
-        // Start / end coords along axis
-        let start = axis.direction * axis.min;
-        let end   = axis.direction * axis.max;
-
-        // -------------------------
-        // Render axis as wireframe Object
-        // -------------------------
-        let object = self.make_axis(start, end, transform);
-
-        wireframe.render(
-            std::slice::from_ref(&object),
-            camera,
-            axis.style,
-            buffer,
-        );
-
-        // -------------------------
-        // Render ticks / axis labels
-        // -------------------------
         if self.show_ticks || self.show_labels {
             self.render_ticks_labels(
                 wireframe,
                 axis,
                 transform,
                 camera,
+                origin_label_drawn,
                 buffer,
             );
         }
@@ -212,6 +248,7 @@ impl Axes3dRenderer {
         axis: AxisSpec,
         transform: Transform,
         camera: &Camera,
+        origin_label_drawn: &mut bool,
         buffer: &mut Buffer,
     ) {
         // Project start/end points and find perpendicular screen direction
@@ -264,8 +301,10 @@ impl Axes3dRenderer {
             }
 
             // Draw tick value as text label
-            if self.show_labels {
-                let text = if value.abs() < 1e-10 {
+            let is_origin = value.abs() < 1e-10;
+
+            if self.show_labels && (!is_origin || !*origin_label_drawn) {
+                let text = if is_origin {
                     "0".to_string()
                 } else {
                     format!("{value:.2}")
@@ -288,6 +327,10 @@ impl Axes3dRenderer {
                     &text,
                     axis.label_style,
                 );
+
+                if is_origin {
+                    *origin_label_drawn = true;
+                }
             }
         }
     }

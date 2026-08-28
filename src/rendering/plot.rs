@@ -1,5 +1,5 @@
-use super::{Buffer, Cell, Color};
-use super::{draw_axes_2d, draw_axes_ticks, draw_border, draw_line, draw_point};
+use super::{BrailleBuffer, Buffer, Cell, Color};
+use super::{draw_axes_2d, draw_axes_ticks, draw_border};
 use crate::geometry::Point;
 
 #[derive(Debug, Clone, Copy)]
@@ -152,10 +152,12 @@ impl PlotRenderer {
             area = area.fit_equal_aspect(viewport, cell_aspect);
         }
 
-        // Project points onto buffer screen coords
+        let mut braille = BrailleBuffer::new(buffer.width(), buffer.height());
+
+        // Project points onto the 2x4 subpixel grid.
         let projected: Vec<_> = points
             .iter()
-            .filter_map(|&point| self.project(point, viewport, area))
+            .filter_map(|&point| self.project_braille(point, viewport, area))
             .collect();
 
         // Draw lines between points
@@ -163,14 +165,15 @@ impl PlotRenderer {
             let (x0, y0) = pair[0];
             let (x1, y1) = pair[1];
 
-            draw_line(buffer, x0, y0, x1, y1, self.style.line);
+            braille.draw_line(x0, y0, x1, y1, self.style.line.fg);
         }
 
-        // Set point cells in buffer
-        // -- Write over line cells at vertices if filled
+        // Set the sampled points over the Braille line.
         for (x, y) in projected {
-            draw_point(buffer, x, y, self.style.point);
+            braille.set(x, y, self.style.point.fg);
         }
+
+        braille.composite(buffer);
 
         // Draw x/y axes
         if self.show_axes {
@@ -250,6 +253,33 @@ impl PlotRenderer {
         // Map normalized point into the shared padded plot area.
         let x_screen = area.left as f64 + x_norm * area.width() as f64;
         let y_screen = area.top as f64 + (1.0 - y_norm) * area.height() as f64;
+
+        Some((x_screen.round() as isize, y_screen.round() as isize))
+    }
+
+    fn project_braille(
+        &self,
+        point: Point,
+        viewport: &PlotViewport,
+        area: PlotArea,
+    ) -> Option<(isize, isize)> {
+        let x_range = viewport.x_max - viewport.x_min;
+        let y_range = viewport.y_max - viewport.y_min;
+
+        if x_range.abs() <= f64::EPSILON || y_range.abs() <= f64::EPSILON {
+            return None;
+        }
+
+        let x_norm = (point.x - viewport.x_min) / x_range;
+        let y_norm = (point.y - viewport.y_min) / y_range;
+
+        let left = area.left * 2;
+        let top = area.top * 4;
+        let width = (area.width() + 1) * 2 - 1;
+        let height = (area.height() + 1) * 4 - 1;
+
+        let x_screen = left as f64 + x_norm * width as f64;
+        let y_screen = top as f64 + (1.0 - y_norm) * height as f64;
 
         Some((x_screen.round() as isize, y_screen.round() as isize))
     }

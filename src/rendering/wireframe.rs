@@ -3,6 +3,7 @@ use crate::{
     math::{Mat4, Transform, Vec3, Vec4},
 };
 use super::{
+    BrailleBuffer,
     Buffer, 
     Camera, 
     Cell,
@@ -105,6 +106,90 @@ impl WireframeRenderer {
     }
 
     /**
+     * Render wireframe geometry into a 2x4 Braille subpixel grid,
+     * then pack that grid into terminal cells.
+     */
+    pub fn render_braille(
+        &self,
+        objects: &[Object],
+        camera: &Camera,
+        style: WireframeStyle,
+        buffer: &mut Buffer,
+    ) {
+        let display_aspect = buffer.display_aspect();
+        let mut braille = BrailleBuffer::new(buffer.width(), buffer.height());
+
+        self.render_braille_into(
+            objects,
+            camera,
+            style,
+            display_aspect,
+            0,
+            &mut braille,
+        );
+
+        braille.composite(buffer);
+    }
+
+    pub(crate) fn render_braille_into(
+        &self,
+        objects: &[Object],
+        camera: &Camera,
+        style: WireframeStyle,
+        display_aspect: f64,
+        layer: u8,
+        braille: &mut BrailleBuffer,
+    ) {
+        let proj = camera.projection.matrix(display_aspect);
+        let view = camera.view();
+
+        for object in objects {
+            let mvp = proj * view * object.transform.matrix();
+
+            let projected: Vec<Option<ScreenPoint>> = object
+                .mesh
+                .vertices
+                .iter()
+                .map(|vertex| {
+                    self.mvp_ndc_to_screen_dimensions(
+                        vertex.position,
+                        &mvp,
+                        braille.width(),
+                        braille.height(),
+                    )
+                })
+                .collect();
+
+            for edge in &object.mesh.edges {
+                if let (Some(a), Some(b)) =
+                    (projected[edge.idx0], projected[edge.idx1])
+                {
+                    braille.draw_line_depth(
+                        a.x,
+                        a.y,
+                        a.depth,
+                        b.x,
+                        b.y,
+                        b.depth,
+                        layer,
+                        style.edge.fg,
+                    );
+                }
+            }
+
+            for point in projected.iter().flatten() {
+                braille.set_depth(
+                    point.x,
+                    point.y,
+                    point.depth,
+                    layer,
+                    style.vertex.fg,
+                );
+            }
+        }
+    }
+
+    /**
      * Project local object coord (x_obj, y_obj, z_obj) into a 
      * terminal coordinate based on the camera view and the object's
      * own transform
@@ -173,6 +258,25 @@ impl WireframeRenderer {
         mvp: &Mat4,
         buffer: &Buffer,
     ) -> Option<ScreenPoint> {
+        self.mvp_ndc_to_screen_dimensions(
+            point,
+            mvp,
+            buffer.width(),
+            buffer.height(),
+        )
+    }
+
+    fn mvp_ndc_to_screen_dimensions(
+        &self,
+        point: Vec3,
+        mvp: &Mat4,
+        width: usize,
+        height: usize,
+    ) -> Option<ScreenPoint> {
+        if width == 0 || height == 0 {
+            return None;
+        }
+
         // Transform object-space → clip-space
         let clip = *mvp * Vec4 {
             x: point.x,
@@ -203,8 +307,8 @@ impl WireframeRenderer {
         let ndc_y_norm = (1.0 - ndc_y) * 0.5;
 
         // [0, 1] NDC to screen coordinates [0, dim)
-        let screen_x = ndc_x_norm * (buffer.width() - 1) as f64;
-        let screen_y = ndc_y_norm * (buffer.height() - 1) as f64;
+        let screen_x = ndc_x_norm * (width - 1) as f64;
+        let screen_y = ndc_y_norm * (height - 1) as f64;
 
         Some(ScreenPoint {
             x: screen_x.floor() as isize,

@@ -1,4 +1,5 @@
 mod axes_3d;
+mod braille;
 mod buffer;
 mod camera;
 mod plot;
@@ -8,6 +9,7 @@ mod raster;
 mod wireframe;
 
 pub use axes_3d::{Axes3dRenderer, Axes3dStyle};
+pub(crate) use braille::BrailleBuffer;
 pub use buffer::{Buffer, Cell, Color};
 pub use camera::Camera;
 pub use plot::{PlotArea, PlotAspect, PlotRenderer, PlotStyle, PlotViewport};
