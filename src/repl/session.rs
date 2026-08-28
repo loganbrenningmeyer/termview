@@ -3,7 +3,7 @@ use meval;
 use super::Command;
 use crate::{
     geometry::{Mesh, Object, Point}, 
-    math::sin(sqrt(x*x + y*y)) / sqrt(x*x + y*y)Transform,
+    math::Transform,
     rendering::{
         Buffer, 
         Camera, 
