@@ -1,5 +1,8 @@
 use super::{Buffer, Cell, Color, PlotArea, PlotViewport};
 
+/**
+ * Draws rectangular border around buffer edges
+ */
 pub fn draw_border(buffer: &mut Buffer, color: Color) {
     // Convert usize to isize safely
     let (Ok(width), Ok(height)) = (
@@ -28,6 +31,9 @@ pub fn draw_border(buffer: &mut Buffer, color: Color) {
     buffer.set(width - 1, height - 1, Cell::new('┘').with_fg(color));
 }
 
+/**
+ * 
+ */
 fn draw_text_in_area(
     buffer: &mut Buffer,
     area: PlotArea,
@@ -52,6 +58,35 @@ fn draw_text_in_area(
     }
 }
 
+/**
+ * 
+ */
+pub fn draw_text(
+    buffer: &mut Buffer,
+    x: isize,
+    y: isize,
+    text: &str,
+    cell: Cell,
+) {
+    for (offset, ch) in text.chars().enumerate() {
+        let Ok(offset) = isize::try_from(offset) else {
+            break;
+        };
+
+        buffer.set(
+            x + offset,
+            y,
+            Cell {
+                ch,
+                fg: cell.fg,
+            },
+        );
+    }
+}
+
+/**
+ * 
+ */
 pub fn draw_axes_ticks(
     buffer: &mut Buffer,
     viewport: &PlotViewport,
@@ -120,6 +155,9 @@ pub fn draw_axes_ticks(
     );
 }
 
+/**
+ * 
+ */
 pub fn draw_axes_2d(
     buffer: &mut Buffer,
     area: PlotArea,
@@ -141,6 +179,9 @@ pub fn draw_axes_2d(
     }
 }
 
+/**
+ * 
+ */
 pub fn draw_point(buffer: &mut Buffer, x: isize, y: isize, cell: Cell) {
     buffer.set(x, y, cell);
 }

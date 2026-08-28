@@ -1,8 +1,12 @@
-use crate::math::{Mat4, Quaternion, Vec3};
+use crate::{
+    math::{Mat4, Quaternion, Vec3}, 
+    rendering::PerspectiveProjection
+};
 
 pub struct Camera {
     pub position: Vec3,
     pub rotation: Quaternion,
+    pub projection: PerspectiveProjection,
 }
 
 /**
@@ -26,16 +30,12 @@ pub struct Camera {
  *            in camera-local coordinates
  */
 impl Camera {
-    pub const ORIGIN: Self = Self::new(
-        Vec3::new(0.0, 0.0, 0.0),
-        Quaternion::IDENTITY,
-    );
-
     pub const fn new(
         position: Vec3,
         rotation: Quaternion,
+        projection: PerspectiveProjection,
     ) -> Self {
-        Camera { position, rotation }
+        Camera { position, rotation, projection }
     }
 
     /**
@@ -60,6 +60,38 @@ impl Camera {
         );
 
         rotation * translation
+    }
+
+    /**
+     * Update camera position / rotation given azimuth, elevation, and distance,
+     * oriented with +Z up
+     */
+    pub fn update_camera_3d(
+        &mut self,
+        azimuth: f64,
+        elevation: f64,
+        distance: f64,
+    ) {
+        // Maps camera-local axes as follows:
+        // right (+X)    -> world +Y
+        // up (+Y)       -> world +Z
+        // backward (+Z) -> world +X
+        let z_up_basis = Quaternion::from_axis_angle(
+            Vec3::new(1.0, 1.0, 1.0),
+            120.0,
+        );
+
+        let rotation =
+            Quaternion::from_axis_angle(Vec3::Z, azimuth)
+            * z_up_basis
+            * Quaternion::from_axis_angle(Vec3::X, -elevation);
+
+        self.rotation = rotation;
+
+        // The camera looks down local -Z, so placing it along its rotated
+        // local +Z keeps it looking toward the origin.
+        self.position =
+            rotation.rotate_vec3(Vec3::Z * distance);
     }
 
     /**
@@ -108,5 +140,15 @@ impl Camera {
 }
 
 impl Default for Camera {
-    fn default() -> Self { Self::ORIGIN }
+    fn default() -> Self {
+        let mut camera = Self {
+            position: Vec3::new(0.0, 0.0, 0.0),
+            rotation: Quaternion::IDENTITY,
+            projection: PerspectiveProjection::default(),
+        };
+
+        camera.update_camera_3d(45.0, 25.0, 10.0);
+
+        camera
+    }
 }

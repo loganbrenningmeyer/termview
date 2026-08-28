@@ -46,6 +46,9 @@ pub struct Buffer {
 }
 
 impl Buffer {
+    /// Approximate terminal cell width divided by cell height.
+    pub const DEFAULT_CELL_ASPECT: f64 = 0.5;
+
     pub fn new(width: usize, height: usize) -> Self {
         Self {
             width,
@@ -64,6 +67,14 @@ impl Buffer {
 
     pub fn aspect(&self) -> f64 {
         self.width as f64 / self.height as f64
+    }
+
+    pub fn cell_aspect(&self) -> f64 {
+        Self::DEFAULT_CELL_ASPECT
+    }
+
+    pub fn display_aspect(&self) -> f64 {
+        self.aspect() * self.cell_aspect()
     }
 
     pub fn get(&self, x: usize, y: usize) -> Cell {

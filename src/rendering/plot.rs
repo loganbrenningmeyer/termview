@@ -265,7 +265,7 @@ impl Default for PlotRenderer {
             show_axes: true,
             show_ticks: true,
             num_ticks: 10,
-            show_border: true,
+            show_border: false,
         }
     }
 }

@@ -2,7 +2,6 @@ use crate::math::Mat4;
 
 pub struct PerspectiveProjection {
     pub fov_y: f64,
-    pub aspect: f64,
     pub near: f64,
     pub far: f64,
 }
@@ -24,7 +23,7 @@ impl PerspectiveProjection {
      * 
      * ==> p_\text{clip} = P p_\text{view}
      */
-    pub fn matrix(&self) -> Mat4 {
+    pub fn matrix(&self, aspect: f64) -> Mat4 {
         let mut mat = Mat4 {
             data: [0.0; 16],
         };
@@ -33,7 +32,7 @@ impl PerspectiveProjection {
         let half_fov = (self.fov_y / 2.0).to_radians();
         let focal_length = 1.0 / half_fov.tan();
 
-        mat.set(0, 0, focal_length / self.aspect);
+        mat.set(0, 0, focal_length / aspect);
         
         // y': ==> y' = \text{focal} \cdot y
         mat.set(1, 1, focal_length);
@@ -49,5 +48,15 @@ impl PerspectiveProjection {
         mat.set(3, 2, -1.0);
 
         mat
+    }
+}
+
+impl Default for PerspectiveProjection {
+    fn default() -> Self {
+        Self {
+            fov_y: 50.0,
+            near: 0.1,
+            far: 100.0,
+        }
     }
 }

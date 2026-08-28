@@ -1,25 +1,15 @@
 use crate::{
     geometry::{Object, Vertex}, 
-    math::{Mat4, Vec4},
+    math::{Mat4, Transform, Vec3, Vec4},
 };
 use super::{
     Buffer, 
     Camera, 
     Cell,
-    PerspectiveProjection
 };
 use super::{
     draw_line,
 };
-
-pub struct WireframeRenderer {
-    pub fov_y: f64,
-    pub near: f64,
-    pub far: f64,
-    pub cell_aspect: f64,
-    pub edge_cell: Cell,
-    pub vertex_cell: Cell,
-}
 
 #[derive(Debug, Clone, Copy)]
 pub struct ScreenPoint {
@@ -27,6 +17,24 @@ pub struct ScreenPoint {
     pub y: isize,
     pub depth: f64,
 }
+
+#[derive(Debug, Clone, Copy)]
+pub struct WireframeStyle {
+    pub edge: Cell,
+    pub vertex: Cell,
+}
+
+impl Default for WireframeStyle {
+    fn default() -> Self {
+        Self {
+            edge: Cell::new('#'),
+            vertex: Cell::new('@'),
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct WireframeRenderer;
 
 /**
  * Coordinates rendering pipeline for Objects and
@@ -54,22 +62,18 @@ impl WireframeRenderer {
         &self,
         objects: &[Object],
         camera: &Camera,
+        style: WireframeStyle,
         buffer: &mut Buffer,
     ) {
         // Define perspective projection matrix / view matrix
-        let proj_mat = PerspectiveProjection {
-            fov_y: self.fov_y,
-            aspect: buffer.aspect() * self.cell_aspect,
-            near: self.near,
-            far: self.far,
-        }.matrix();
+        let proj = camera.projection.matrix(buffer.display_aspect());
 
         // [model matrix...] -> view matrix -> projection matrix
-        let view_proj = proj_mat * camera.view();
+        let view = camera.view();
 
         for object in objects {
             // Projection * View * Model == Model → View → Projection
-            let mvp = view_proj * object.transform.matrix();
+            let mvp = proj * view * object.transform.matrix();
 
             // Project vertex coordinates onto screen
             let vertices = &object.mesh.vertices;
@@ -89,15 +93,56 @@ impl WireframeRenderer {
                 if let (Some(a), Some(b)) =
                     (proj_verts[edge.idx0], proj_verts[edge.idx1])
                 {
-                    self.render_edge(&a, &b, buffer);
+                    self.render_edge(&a, &b, style, buffer);
                 }
             }
 
             // Set vertex characters on Canvas
             for p in proj_verts.iter().flatten() {
-                buffer.set(p.x, p.y, self.vertex_cell);
+                buffer.set(p.x, p.y, style.vertex);
             }
         }
+    }
+
+    /**
+     * Project local object coord (x_obj, y_obj, z_obj) into a 
+     * terminal coordinate based on the camera view and the object's
+     * own transform
+     */
+    pub fn project_object_point(
+        &self,
+        point: Vec3,
+        transform: Transform,
+        camera: &Camera,
+        buffer: &Buffer,
+    ) -> Option<ScreenPoint> {
+        // Create model-view-projection matrix
+        let proj: Mat4  = camera.projection.matrix(buffer.display_aspect());
+        let view: Mat4  = camera.view();
+        let model: Mat4 = transform.matrix();
+
+        let mvp = proj * view * model;
+
+        self.mvp_ndc_to_screen(point, &mvp, buffer)
+    }
+
+    /**
+     * Projects (x, y, z) world coordinate into a terminal
+     * coordinate based on the camera view
+     */
+    pub fn project_world_point(
+        &self,
+        point: Vec3,
+        camera: &Camera,
+        buffer: &Buffer,
+    ) -> Option<ScreenPoint> {
+        // Define perspective projection matrix / view matrix
+        let proj = camera.projection.matrix(buffer.display_aspect());
+
+        // [model matrix...] -> view matrix -> projection matrix
+        let mvp = proj * camera.view();
+
+        self.mvp_ndc_to_screen(point, &mvp, buffer)
     }
 
     /**
@@ -113,11 +158,26 @@ impl WireframeRenderer {
         mvp: &Mat4,
         buffer: &Buffer,
     ) -> Option<ScreenPoint> {
+        self.mvp_ndc_to_screen(vertex.position, mvp, buffer)
+    }
+
+    /**
+     * 1. Given model-view-projection matrix, transforms point
+     *    from local object-space to clip-space
+     * 2. Converts from clip-space to normalized device coords (NDC)
+     * 3. Converts from NDC to screen coordinates based on buffer dims
+     */
+    fn mvp_ndc_to_screen(
+        &self,
+        point: Vec3,
+        mvp: &Mat4,
+        buffer: &Buffer,
+    ) -> Option<ScreenPoint> {
         // Transform object-space → clip-space
         let clip = *mvp * Vec4 {
-            x: vertex.position.x,
-            y: vertex.position.y,
-            z: vertex.position.z,
+            x: point.x,
+            y: point.y,
+            z: point.z,
             w: 1.0,
         };
 
@@ -142,9 +202,9 @@ impl WireframeRenderer {
         let ndc_x_norm = (ndc_x + 1.0) * 0.5;
         let ndc_y_norm = (1.0 - ndc_y) * 0.5;
 
-        // [0, 1] NDC to screen coordinates
-        let screen_x = ndc_x_norm * buffer.width() as f64;
-        let screen_y = ndc_y_norm * buffer.height() as f64;
+        // [0, 1] NDC to screen coordinates [0, dim)
+        let screen_x = ndc_x_norm * (buffer.width() - 1) as f64;
+        let screen_y = ndc_y_norm * (buffer.height() - 1) as f64;
 
         Some(ScreenPoint {
             x: screen_x.floor() as isize,
@@ -160,6 +220,7 @@ impl WireframeRenderer {
         &self,
         a: &ScreenPoint,
         b: &ScreenPoint,
+        style: WireframeStyle,
         buffer: &mut Buffer,
     ) {
         draw_line(
@@ -168,20 +229,7 @@ impl WireframeRenderer {
             a.y, 
             b.x,
             b.y, 
-            self.edge_cell,
+            style.edge,
         );
-    }
-}
-
-impl Default for WireframeRenderer {
-    fn default() -> Self {
-        WireframeRenderer {
-            fov_y: 50.0,
-            near: 0.1,
-            far: 100.0,
-            cell_aspect: 0.5,
-            edge_cell: Cell::new('#'),
-            vertex_cell: Cell::new('@'),
-        }
     }
 }
