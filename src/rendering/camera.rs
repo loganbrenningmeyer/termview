@@ -13,6 +13,7 @@ pub struct Camera {
 /**
  * Camera representing the view from which world space points are projected
  * 
+ * ```text
  *      position (Vec3): camera position in world coordinates
  *      rotation (Quaternion): camera local orientation relative to the world coordinate system
  *          - Represents camera accumulated rotation from its original orientation
@@ -29,6 +30,7 @@ pub struct Camera {
  *          - Applying rotation to a local direction gives that direction in world coordinates
  *          - Applying inverse rotation to a world-relative direction gives that direction
  *            in camera-local coordinates
+ * ```
  */
 impl Camera {
     pub const fn new(
