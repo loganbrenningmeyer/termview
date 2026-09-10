@@ -1,5 +1,11 @@
 use super::{Buffer, Cell, Color};
 
+/**
+ * Braille cells are 2x4 grid of dots
+ * -- Completed mask for the character is
+ *    created by adding the corresponding bit
+ *    to U+2800 (the blank braille character)
+ */
 const DOT_BITS: [[u8; 2]; 4] = [
     [0x01, 0x08],
     [0x02, 0x10],

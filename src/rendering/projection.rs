@@ -1,5 +1,45 @@
+use std::fmt;
 use crate::math::Mat4;
 
+#[derive(Debug)]
+pub enum Projection {
+    Perspective(PerspectiveProjection),
+    Orthographic(OrthographicProjection),
+}
+
+impl Projection {
+    pub fn matrix(&self, aspect: f64) -> Mat4 {
+        match self {
+            Projection::Perspective(p) => p.matrix(aspect),
+            Projection::Orthographic(o) => o.matrix(aspect),
+        }
+    }
+
+    pub fn near(&self) -> f64 {
+        match self {
+            Projection::Perspective(p) => p.near,
+            Projection::Orthographic(o) => o.near,
+        }
+    }
+}
+
+impl Default for Projection {
+    fn default() -> Self {
+        Projection::Perspective(PerspectiveProjection::default())
+    }
+}
+
+impl fmt::Display for Projection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Projection::Perspective(_) => write!(f, "Perspective"),
+            Projection::Orthographic(_) => write!(f, "Orthographic"),
+        }
+    }
+}
+
+
+#[derive(Debug)]
 pub struct PerspectiveProjection {
     pub fov_y: f64,
     pub near: f64,
@@ -55,6 +95,70 @@ impl Default for PerspectiveProjection {
     fn default() -> Self {
         Self {
             fov_y: 50.0,
+            near: 0.1,
+            far: 100.0,
+        }
+    }
+}
+
+
+#[derive(Debug)]
+pub struct OrthographicProjection {
+    pub size: f64,
+    pub near: f64,
+    pub far: f64,
+}
+
+impl OrthographicProjection {
+    /**
+     * Orthographic projection matrix
+     * - Similar to perspective projection but uses a box
+     *   instead of a frustum with fov; all rays are parallel
+     *   - Since w=1 in the last row, there is no division by depth
+     * - Any ray within the box is rendered
+     * 
+     *     x        y        z      |        w
+     * [ 2/(r-l)    0        0      |  -(r+l)/(r-l) ]  -> x'
+     * [   0      2/t-b      0      |  -(t+b)/(t-b) ]  -> y'
+     * [   0        0     -2/(f-n)  |  -(f+n)/(f-n) ]  -> z'
+     * [   0        0        0      |        1      ]  -> w'
+     */
+    pub fn matrix(&self, aspect: f64) -> Mat4 {
+        let mut mat = Mat4 {
+            data: [0.0; 16],
+        };
+
+        let t = self.size;
+        let b = -self.size;
+        let r = self.size * aspect;
+        let l = -self.size * aspect;
+
+        let f = self.far;
+        let n = self.near;
+
+        // x'
+        mat.set(0, 0, 2.0/(r - l));
+        mat.set(0, 3, -(r + l)/(r - l));
+
+        // y'
+        mat.set(1, 1, 2.0/(t - b));
+        mat.set(1, 3, -(t + b)/(t - b));
+
+        // z'
+        mat.set(2, 2, -2.0/(f - n));
+        mat.set(2, 3, -(f + n)/(f - n));
+
+        // w'
+        mat.set(3, 3, 1.0);
+
+        mat
+    }
+}
+
+impl Default for OrthographicProjection {
+    fn default() -> Self {
+        Self {
+            size: 5.0,
             near: 0.1,
             far: 100.0,
         }

@@ -1,3 +1,5 @@
+use crate::rendering::{Projection, PerspectiveProjection, OrthographicProjection};
+
 pub enum Command {
     SetDimension(u8),
     SetView {
@@ -7,6 +9,7 @@ pub enum Command {
         y_max: f64,
         z_bounds: Option<(f64, f64)>,
     },
+    SetProjection(Projection),
     SetSamples(usize),
     ShowAxes(bool),
     ShowTicks(bool),
@@ -14,7 +17,7 @@ pub enum Command {
     Plot(String),
     Plot3d(String),
     Replot,
-    Show,
+    Config,
     Help,
     Quit,
 }
@@ -26,12 +29,13 @@ impl Command {
 
         // Map to proper parser
         match arguments.as_slice() {
-            ["quit"] | ["exit"] => Ok(Command::Quit),
-            ["help"] => Ok(Command::Help),
-            ["show"] => Ok(Command::Show),
+            ["q"] | ["Q"] | ["quit"] | ["exit"] => Ok(Command::Quit),
+            ["h"] | ["H"] | ["help"] => Ok(Command::Help),
+            ["c"] | ["C"] | ["config"] | ["cfg"] => Ok(Command::Config),
             ["replot"] => Ok(Command::Replot),
             
             ["set", "view", args @ ..] => Self::parse_set_view(args),
+            ["set", "proj", val] => Self::parse_set_projection(val),
             ["set", "dim", val] => Self::parse_set_dimension(val),
             ["set", "samples", val] => Self::parse_set_samples(val),
 
@@ -181,5 +185,17 @@ impl Command {
             y_max,
             z_bounds,
         })
+    }
+
+    // -------------------------
+    // termview> set proj <p, o>
+    // termview> set proj <perspective, orthographic>
+    // -------------------------
+    fn parse_set_projection(val: &str) -> Result<Command, String> {
+        match val {
+            "p" | "perspective" => Ok(Command::SetProjection(Projection::Perspective(PerspectiveProjection::default()))),
+            "o" | "orthorgraphic" => Ok(Command::SetProjection(Projection::Orthographic(OrthographicProjection::default()))),
+            _ => Err("projection must be perspective (p) or orthographic (o)".into()),
+        }
     }
 }

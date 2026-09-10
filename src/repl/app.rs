@@ -153,23 +153,52 @@ impl TermviewApp {
             }
 
             let changed = match key.code {
-                KeyCode::Left => {
+                // -------------------------
+                // Camera Orbit
+                // -------------------------
+                KeyCode::Left | KeyCode::Char('a') => {
                     self.session.orbit_camera_3d(-5.0, 0.0);
                     true
                 }
-                KeyCode::Right => {
+                KeyCode::Right | KeyCode::Char('d') => {
                     self.session.orbit_camera_3d(5.0, 0.0);
                     true
                 }
-                KeyCode::Up => {
+                KeyCode::Up | KeyCode::Char('w') => {
                     self.session.orbit_camera_3d(0.0, 5.0);
                     true
                 }
-                KeyCode::Down => {
+                KeyCode::Down | KeyCode::Char('s') => {
                     self.session.orbit_camera_3d(0.0, -5.0);
                     true
                 }
-                KeyCode::Esc | KeyCode::Char('q') => break,
+
+                // -------------------------
+                // Camera Zoom
+                // -------------------------
+                // Zoom in
+                KeyCode::Char('e') => {
+                    self.session.zoom_camera_3d(-1.0);
+                    true
+                }
+                // Zoom out
+                KeyCode::Char('q') => {
+                    self.session.zoom_camera_3d(1.0);
+                    true
+                }
+
+                // -------------------------
+                // Reset camera to default
+                // -------------------------
+                KeyCode::Char('r') => {
+                    self.session.reset_camera_3d();
+                    true
+                }
+
+                // -------------------------
+                // Exit plot
+                // -------------------------
+                KeyCode::Esc | KeyCode::Enter | KeyCode::Char('x') => break,
                 _ => false,
             };
 

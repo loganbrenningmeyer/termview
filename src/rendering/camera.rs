@@ -1,12 +1,13 @@
 use crate::{
     math::{Mat4, Quaternion, Vec3}, 
-    rendering::PerspectiveProjection
+    rendering::Projection,
 };
 
 pub struct Camera {
     pub position: Vec3,
     pub rotation: Quaternion,
-    pub projection: PerspectiveProjection,
+    pub projection: Projection,
+    pub orbit: CameraOrbit,
 }
 
 /**
@@ -33,9 +34,10 @@ impl Camera {
     pub const fn new(
         position: Vec3,
         rotation: Quaternion,
-        projection: PerspectiveProjection,
+        projection: Projection,
+        orbit: CameraOrbit,
     ) -> Self {
-        Camera { position, rotation, projection }
+        Camera { position, rotation, projection, orbit }
     }
 
     /**
@@ -66,12 +68,7 @@ impl Camera {
      * Update camera position / rotation given azimuth, elevation, and distance,
      * oriented with +Z up
      */
-    pub fn update_camera_3d(
-        &mut self,
-        azimuth: f64,
-        elevation: f64,
-        distance: f64,
-    ) {
+    pub fn update_camera_3d(&mut self) {
         // Maps camera-local axes as follows:
         // right (+X)    -> world +Y
         // up (+Y)       -> world +Z
@@ -82,16 +79,16 @@ impl Camera {
         );
 
         let rotation =
-            Quaternion::from_axis_angle(Vec3::Z, azimuth)
+            Quaternion::from_axis_angle(Vec3::Z, self.orbit.azimuth)
             * z_up_basis
-            * Quaternion::from_axis_angle(Vec3::X, -elevation);
+            * Quaternion::from_axis_angle(Vec3::X, -self.orbit.elevation);
 
         self.rotation = rotation;
 
         // The camera looks down local -Z, so placing it along its rotated
         // local +Z keeps it looking toward the origin.
         self.position =
-            rotation.rotate_vec3(Vec3::Z * distance);
+            rotation.rotate_vec3(Vec3::Z * self.orbit.distance);
     }
 
     /**
@@ -144,11 +141,29 @@ impl Default for Camera {
         let mut camera = Self {
             position: Vec3::new(0.0, 0.0, 0.0),
             rotation: Quaternion::IDENTITY,
-            projection: PerspectiveProjection::default(),
+            projection: Projection::default(),
+            orbit: CameraOrbit::default(),
         };
 
-        camera.update_camera_3d(45.0, 25.0, 10.0);
+        camera.update_camera_3d();
 
         camera
+    }
+}
+
+
+pub struct CameraOrbit {
+    pub azimuth: f64,
+    pub elevation: f64,
+    pub distance: f64,
+}
+
+impl Default for CameraOrbit {
+    fn default() -> Self {
+        Self {
+            azimuth: 45.0,
+            elevation: 25.0,
+            distance: 10.0,
+        }
     }
 }

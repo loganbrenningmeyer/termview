@@ -138,6 +138,18 @@ pub struct PlotViewport {
     pub y_max: f64,
 }
 
+impl Default for PlotViewport {
+    fn default() -> Self {
+        Self {
+            x_min: -10.0,
+            x_max: 10.0,
+            y_min: -10.0,
+            y_max: 10.0,
+        }
+    }
+}
+
+
 impl PlotRenderer {
     /**
      * Project / render 2D points into buffer, fitting
@@ -290,8 +302,8 @@ impl Default for PlotRenderer {
         Self {
             style: PlotStyle::default(),
             aspect: PlotAspect::Auto,
-            pad_width: 0,
-            pad_height: 0,
+            pad_width: 5,
+            pad_height: 2,
             show_axes: true,
             show_ticks: true,
             num_ticks: 10,
