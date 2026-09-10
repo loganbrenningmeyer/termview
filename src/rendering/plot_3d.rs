@@ -33,12 +33,12 @@ pub struct Plot3dRenderer {
 impl Default for PlotViewport3d {
     fn default() -> Self {
         Self {
-            x_min: -3.0,
-            x_max: 3.0,
-            y_min: -3.0,
-            y_max: 3.0,
-            z_min: -3.0,
-            z_max: 3.0,
+            x_min: -10.0,
+            x_max: 10.0,
+            y_min: -10.0,
+            y_max: 10.0,
+            z_min: -10.0,
+            z_max: 10.0,
         }
     }
 }

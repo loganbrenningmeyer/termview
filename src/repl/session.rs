@@ -5,8 +5,12 @@ use crate::{
     geometry::{Mesh, Object, Point}, 
     math::Transform, 
     rendering::{
-        Buffer, Camera, CameraOrbit, OrthographicProjection, Plot3dRenderer, PlotRenderer, PlotViewport, PlotViewport3d, Projection::{self, Orthographic},
-    }
+        Buffer, 
+        Camera, CameraOrbit, 
+        Projection, OrthographicProjection, 
+        Plot3dRenderer, PlotRenderer, 
+        PlotViewport, PlotViewport3d,
+    },
 };
 
 
@@ -462,20 +466,6 @@ Current settings
   [H] | help                                    Display this help
 
   [Q] | quit | exit                             Exit termview
-
---------------------
-  Example Commands
---------------------
-
-  set dim 2
-  set view (-4, 4) (-4, 4)
-  set samples 800
-  plot sin(x)
-
-  set dim 3
-  set view (-3, 3) (-3, 3) (-2, 2)
-  set samples 20
-  plot sin(x) * cos(y)
 
 ==============================
         Plot Controls 

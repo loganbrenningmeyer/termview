@@ -13,10 +13,10 @@ pub struct Camera {
 /**
  * Camera representing the view from which world space points are projected
  * 
- *      position (Vec3): Camera position in world coordinates
- *      rotation (Quaternion): Camera's local orientation relative to the world coordinate system
- *          - Represents Camera's accumulated rotation from its original orientation
- *          - current orientation = rotation ⨯ original orientation
+ *      position (Vec3): camera position in world coordinates
+ *      rotation (Quaternion): camera local orientation relative to the world coordinate system
+ *          - Represents camera accumulated rotation from its original orientation
+ *          - current orientation = rotation * original orientation
  *          - After rotating the camera, the Quaternion describes where the original camera-local
  *            axes now point in world space
  * 
@@ -24,7 +24,7 @@ pub struct Camera {
  *                  Vec3::new(0.0, 0.0, -1.0)
  *              )
  * 
- *              // Gives the camera's forward direction in world space
+ *              // Gives the camera forward direction in world space
  * 
  *          - Applying rotation to a local direction gives that direction in world coordinates
  *          - Applying inverse rotation to a world-relative direction gives that direction
