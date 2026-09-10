@@ -15,10 +15,10 @@ impl Mesh {
         y_max: f64,
         x_samples: usize,
         y_samples: usize,
-        function: F,
+        mut function: F,
     ) -> Mesh 
     where 
-        F: Fn(f64, f64) -> f64,
+        F: FnMut(f64, f64) -> f64,
     {
         let mut vertices: Vec<Vertex> = Vec::new();
         let mut edges: Vec<Edge> = Vec::new(); 

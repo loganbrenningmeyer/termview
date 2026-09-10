@@ -1,9 +1,13 @@
-use meval;
+use std::collections::HashMap;
 
 use super::Command;
 use crate::{
     geometry::{Mesh, Object, Point}, 
     math::Transform, 
+    parsing::{
+        Parser,
+        Tokenizer,
+    },
     rendering::{
         Buffer, 
         Camera, CameraOrbit, 
@@ -306,18 +310,26 @@ impl Session {
         &self,
         expression: &str,
     ) -> Result<Object, String> {
-        // Parse expression w/ meval
-        let expr: meval::Expr = expression
-            .parse()
-            .map_err(|error| {
-                format!("invalid expression `{expression}`: {error}")
-            })?;
+        // Tokenize expression
+        let mut tokenizer = Tokenizer::new(expression);
+        let tokens = tokenizer.tokenize()?;
 
-        let function = expr
-            .bind2("x", "y")
-            .map_err(|error| {
-                format!("could not bind variable `x`: {error}")
-            })?;
+        // Parse tokens into abstract syntax tree
+        let mut parser = Parser::new(tokens);
+        let tree = parser.parse_expression(0)?;
+
+        // Compute (x, f(x)) over x-samples in viewport range
+        let mut vars = HashMap::from([
+            ("x".to_string(), 0.0),
+            ("y".to_string(), 0.0),
+        ]);
+
+        // Define Fn(f64, f64) -> f64 for Mesh::surface()
+        let function = |x: f64, y: f64| {
+            *vars.get_mut("x").unwrap() = x;
+            *vars.get_mut("y").unwrap() = y;
+            tree.evaluate(&vars)
+        };
 
         let viewport = &self.viewport_3d;
         let (x_samples, y_samples) = self.samples_3d;
@@ -340,26 +352,25 @@ impl Session {
      * points sampled over viewport range
      */
     fn sample_expression(&self, expression: &str) -> Result<Vec<Point>, String> {
-        // Parse expression w/ meval
-        let expr: meval::Expr = expression
-            .parse()
-            .map_err(|error| {
-                format!("invalid expression `{expression}`: {error}")
-            })?;
+        // Tokenize expression
+        let mut tokenizer = Tokenizer::new(expression);
+        let tokens = tokenizer.tokenize()?;
 
-        let function = expr
-            .bind("x")
-            .map_err(|error| {
-                format!("could not bind variable `x`: {error}")
-            })?;
+        // Parse tokens into abstract syntax tree
+        let mut parser = Parser::new(tokens);
+        let tree = parser.parse_expression(0)?;
 
         // Compute (x, f(x)) over x-samples in viewport range
+        let mut vars = HashMap::from([("x".to_string(), 0.0)]);
+
         let points = (0..self.samples_2d)
             .filter_map(|i| {
                 let t = i as f64 / (self.samples_2d - 1) as f64;
                 let x = self.viewport_2d.x_min
                     + t * (self.viewport_2d.x_max - self.viewport_2d.x_min);
-                let y = function(x);
+                
+                *vars.get_mut("x").unwrap() = x;
+                let y = tree.evaluate(&vars);
 
                 y.is_finite().then_some(Point::new(x, y))
             })
