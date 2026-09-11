@@ -1,6 +1,6 @@
 use super::{BrailleBuffer, Buffer, Camera, Cell, Color, PlotViewport3d, WireframeStyle};
 use crate::{
-    geometry::{Edge, Mesh, Object, Vertex}, 
+    geometry::{Edge, Mesh, Vertex}, 
     math::{Transform, Vec3}, 
     rendering::{draw_line, draw_text, WireframeRenderer},
 };
@@ -154,10 +154,11 @@ impl AxesRenderer3d {
         for (index, axis) in Self::axis_specs(viewport, style).into_iter().enumerate() {
             let start = axis.direction * axis.min;
             let end = axis.direction * axis.max;
-            let object = self.make_axis(start, end, transform);
+            let mesh = self.make_axis(start, end);
 
             wireframe.render_braille_into(
-                std::slice::from_ref(&object),
+                &mesh,
+                transform,
                 camera,
                 axis.style,
                 display_aspect,
@@ -229,18 +230,14 @@ impl AxesRenderer3d {
         &self,
         start: Vec3,
         end: Vec3,
-        transform: Transform,
-    ) -> Object {
-        Object::new(
-            Mesh {
-                vertices: vec![
-                    Vertex { position: start },
-                    Vertex { position: end },
-                ],
-                edges: vec![Edge::new(0, 1)],
-            },
-            transform,
-        )
+    ) -> Mesh {
+        Mesh {
+            vertices: vec![
+                Vertex { position: start },
+                Vertex { position: end },
+            ],
+            edges: vec![Edge::new(0, 1)],
+        }
     }
 
     /**

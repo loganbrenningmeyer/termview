@@ -1,7 +1,7 @@
 use std::{collections::HashMap, io::{self, Write}};
 use std::time::{Duration, Instant};
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEvent, KeyEventKind}, 
+    event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers}, 
     terminal::{disable_raw_mode, enable_raw_mode},
 };
 
@@ -14,7 +14,7 @@ use crate::{
         KeyResult,
         Layout,
         Pane,
-        PaneContent,
+        PlotState,
         Rect,
         Widget,
     },
@@ -58,7 +58,8 @@ pub struct TermviewApp {
     session: Session,
     presenter: TerminalPresenter,
     command_pane: Pane<CommandWidget>,
-    panes: HashMap<usize, Pane<PaneContent>>,
+    command_cursor: usize,
+    panes: HashMap<usize, Pane<PlotState>>,
     active_pane: usize,
     next_pane_id: usize,
     layout: Layout,
@@ -73,21 +74,22 @@ impl TermviewApp {
         let area = Rect::new(0, 0, width, height);
 
         Self {
-            session: Session::default(),
+            session: Session,
             presenter: TerminalPresenter::new(width, height),
             command_pane: Pane::new(
                 Rect::new(0, 0, 0, 0),
                 InteractionMode::Static,
-                FocusState::Inactive,
+                FocusState::InactiveCommand,
                 CommandWidget { text: String::new() },
             ),
+            command_cursor: 0,
             panes: HashMap::from([(
                 0,
                 Pane::new(
                     area, 
                     InteractionMode::Static, 
-                    FocusState::Active,
-                    PaneContent::Empty,
+                    FocusState::ActivePane,
+                    PlotState::default(),
                 ),
             )]),
             active_pane: 0,
@@ -136,7 +138,10 @@ impl TermviewApp {
      * - Based on SessionOutput from executing Command,
      *   can be None, Message, Plot2d, or Plot3d
      */
-    fn apply_command(&mut self, command: Command) -> Result<CommandEffect, Box<dyn std::error::Error>> {
+    fn apply_command(
+        &mut self, 
+        command: Command
+    ) -> Result<CommandEffect, Box<dyn std::error::Error>> {
         self.message = None;
 
         if matches!(command, Command::Quit) {
@@ -152,9 +157,9 @@ impl TermviewApp {
             Command::SetSpeed(_) | Command::SetTime(_)
         ) {
             let pane = self.get_active_pane()?;
-            let content = &mut pane.widget;
+            let plot_state = &mut pane.widget;
 
-            let animation = content
+            let animation = plot_state.content
                 .animation_mut()
                 .ok_or("The active pane has no animation")?;
         
@@ -178,9 +183,7 @@ impl TermviewApp {
                     animation.phase = *time;
                     
                     // Time elapsed, resample animation
-                    if matches!(&command, Command::SetTime(_)) {
-                        content.resample();
-                    }
+                    plot_state.resample();
                 }
 
                 _ => unreachable!(),
@@ -189,7 +192,11 @@ impl TermviewApp {
             return Ok(CommandEffect::Redraw);   // redraw after animation updates
         }
 
-        let result = self.session.execute(self.active_pane, command)?;
+        let pane = self.panes
+            .get_mut(&self.active_pane)
+            .ok_or_else(|| io::Error::other("Active pane does not exist"))?;
+
+        let result = self.session.execute(&mut pane.widget, command)?;
 
         // -------------------------
         // Execute parsed Command with Session
@@ -197,16 +204,17 @@ impl TermviewApp {
         match result {
             SessionOutput::None => Ok(CommandEffect::None),
 
+            SessionOutput::Redraw => Ok(CommandEffect::Redraw),
+
             SessionOutput::Message(msg) => {
                 self.message = Some(msg);
                 Ok(CommandEffect::None)
             }
 
-            SessionOutput::Plot { title, content } => {
+            SessionOutput::PlotUpdated { title } => {
                 let pane = self.get_active_pane()?;
 
                 pane.set_title(title);
-                pane.set_widget(content);
                 pane.mode = InteractionMode::Interactive;
 
                 Ok(CommandEffect::Redraw)
@@ -241,11 +249,11 @@ impl TermviewApp {
             " Press : to enter a command".to_string()
         };
         
-        self.command_pane.set_focus(if typing {
-            FocusState::Active
+        if typing {
+            self.command_pane.set_focus(FocusState::ActiveCommand);
         } else {
-            FocusState::Inactive
-        });
+            self.command_pane.set_focus(FocusState::InactiveCommand);
+        }
 
         let frame = self.presenter.begin_frame();
 
@@ -352,13 +360,29 @@ impl TermviewApp {
             match event::read()? {
                 // Key-input terminal resize
                 Event::Resize(width, height) => {
-                    self.resize_view(width as usize, height as usize);
+                    self.resize_view(
+                        width as usize, 
+                        height.saturating_sub(1) as usize
+                    );
+
+                    // Clear terminal
+                    write!(output, "{}{}", term::CLEAR_SCREEN, term::CURSOR_HOME)?;
+
                     self.present(output)?;
                 }
 
                 Event::Key(key) => {
                     if key.kind == KeyEventKind::Release {
                         continue;
+                    }
+
+                    // -------------------------
+                    // Ctrl + C to Quit
+                    // -------------------------
+                    if key.modifiers.contains(KeyModifiers::CONTROL)
+                        && matches!(key.code, KeyCode::Char('c' | 'C'))
+                    {
+                        return Ok(AppControl::Quit);
                     }
 
                     // -------------------------
@@ -504,13 +528,45 @@ impl TermviewApp {
                 if (c.is_alphanumeric() 
                     || matches!(c, '+' | '-' | '*' | '/' | '^' | '(' | ')' | ' ' | '.' | '=')) => 
             {
-                self.command.push(c);
+                self.command.insert(self.command_cursor, c);
+                self.command_cursor += 1;
                 CommandKeyResult::Changed
             }
 
-            // Backspace: Delete character
-            KeyCode::Backspace | KeyCode::Delete => {
-                if self.command.pop().is_some() {
+            // Left / Right: Move cursor
+            KeyCode::Left => {
+                if self.command_cursor > 0 {
+                    self.command_cursor -= 1;
+                    CommandKeyResult::Changed
+                } else {
+                    CommandKeyResult::Ignored
+                }
+            }
+
+            KeyCode::Right => {
+                if self.command_cursor <= self.command.len() {
+                    self.command_cursor += 1;
+                    CommandKeyResult::Changed
+                } else {
+                    CommandKeyResult::Ignored
+                }
+            }
+
+            // Backspace: delete preceding character
+            KeyCode::Backspace => {
+                if self.command_cursor > 0 {
+                    self.command_cursor -= 1;
+                    self.command.remove(self.command_cursor);
+                    CommandKeyResult::Changed
+                } else {
+                    CommandKeyResult::Ignored
+                }
+            }
+
+            // Delete: delete current character
+            KeyCode::Delete => {
+                if self.command_cursor < self.command.len() {
+                    self.command.remove(self.command_cursor);
                     CommandKeyResult::Changed
                 } else {
                     CommandKeyResult::Ignored
@@ -518,10 +574,16 @@ impl TermviewApp {
             }
 
             // Enter: Submit command
-            KeyCode::Enter => CommandKeyResult::Submit,
+            KeyCode::Enter => {
+                self.command_cursor = 0;
+                CommandKeyResult::Submit
+            }
 
             // Exit: Return to Pane mode
-            KeyCode::Esc => CommandKeyResult::Cancel,
+            KeyCode::Esc => {
+                self.command_cursor = 0;
+                CommandKeyResult::Cancel
+            }
 
             _ => CommandKeyResult::Ignored,
         }
@@ -610,7 +672,7 @@ impl TermviewApp {
         let active_pane = self.panes.get_mut(&active_id).unwrap();
 
         active_pane.set_area(new_active_area);
-        active_pane.set_focus(FocusState::Inactive);
+        active_pane.set_focus(FocusState::InactivePane);
 
         // Insert newly split next Pane into hashmap
         self.panes.insert(
@@ -618,8 +680,8 @@ impl TermviewApp {
             Pane::new(
                 next_area,
                 InteractionMode::Static,
-                FocusState::Active,
-                PaneContent::Empty,
+                FocusState::ActivePane,
+                PlotState::default(),
             ),
         );
 
@@ -642,9 +704,9 @@ impl TermviewApp {
             .position(|&id| id == self.active_pane)
             .ok_or_else(|| io::Error::other("Active pane does not exist"))?;
 
-        self.get_active_pane()?.set_focus(FocusState::Inactive);    // Current -> Inactive
+        self.get_active_pane()?.set_focus(FocusState::InactivePane);    // Current -> Inactive
         self.active_pane = pane_indices[(active_idx + 1) % pane_indices.len()];
-        self.get_active_pane()?.set_focus(FocusState::Active);      // Next -> Active
+        self.get_active_pane()?.set_focus(FocusState::ActivePane);      // Next -> Active
 
         Ok(())
     }
@@ -667,10 +729,9 @@ impl TermviewApp {
 
         // Remove pane from HashMap & Session plot history
         self.panes.remove(&closing_id);
-        self.session.forget_pane(closing_id);
 
         self.active_pane = survivor_id;
-        self.get_active_pane()?.set_focus(FocusState::Active);
+        self.get_active_pane()?.set_focus(FocusState::ActivePane);
 
         // Resize panes
         let (width, height) = term::canvas_dims();
@@ -682,7 +743,7 @@ impl TermviewApp {
     /**
      * Mutably get active pane, otherwise error if not found
      */
-    fn get_active_pane(&mut self) -> io::Result<&mut Pane<PaneContent>> {
+    fn get_active_pane(&mut self) -> io::Result<&mut Pane<PlotState>> {
         self.panes
             .get_mut(&self.active_pane)
             .ok_or_else(|| io::Error::other("Active pane does not exist").into())

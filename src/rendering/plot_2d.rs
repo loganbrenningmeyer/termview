@@ -230,7 +230,7 @@ impl PlotRenderer2d {
 
         // Draw border
         if self.show_border {
-            draw_border(buffer, self.style.border_color);
+            draw_border(buffer, self.style.border_color, true);
         }
     }
 

@@ -1,3 +1,5 @@
+use crate::parsing::{TokenNode::VariableNode, tree::{Constant, Variable}};
+
 use super::{
     Function,
     BindingPower,
@@ -104,9 +106,15 @@ impl Parser {
 
                     Ok(TokenNode::CallNode(function, Box::new(arg)))
 
-                // Variable, e.g., x, y, z, t
+                // Mathematical Constants
+                } else if let Some(constant) = Constant::from_name(&name) {
+                    Ok(TokenNode::ConstantNode(constant))
+
+                // Variables
+                } else if let Some(_) = Variable::from_name(&name) {
+                    Ok(VariableNode(name.to_ascii_lowercase().to_string()))
                 } else {
-                    Ok(TokenNode::IdentifierNode(name))
+                    Err(format!("Unknown token {}", name).into())
                 }
             },
 

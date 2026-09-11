@@ -1,111 +1,77 @@
-use std::collections::HashMap;
-
 use super::Command;
 use crate::{
-    geometry::{Mesh, Object, Point, sample_curve_at, sample_surface_at}, 
-    math::Transform, 
-    parsing::{Parser, Tokenizer}, 
+    geometry::{Mesh, sample_surface_at, sample_curve_at}, 
+    parsing::{TokenNode}, 
     rendering::{
-        Buffer, 
-        Camera, 
-        PlotRenderer2d, 
-        PlotRenderer3d, 
         PlotViewport2d, 
         PlotViewport3d,
     }, 
-    ui::{Animation, PaneContent, PlotWidget2d, PlotWidget3d},
+    ui::{
+        Animation, 
+        LastPlot,
+        PlotContent, 
+        PlotMode,
+        PlotState, 
+        PlotView2d,
+        PlotView3d,
+        CurvePlot, 
+        SurfacePlot,
+    },
 };
 
 
 pub enum SessionOutput {
     None,
     Message(String),
-    Plot {
-        title: String,
-        content: PaneContent,
-    },
+    Redraw,
+    PlotUpdated { title: String },
 }
 
-#[derive(Debug, Clone)]
-struct LastPlot {
-    expression: String,
-    mode: PlotMode,
-    animated: bool,
-}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PlotMode {
-    TwoD,
-    ThreeD,
-}
-
-pub struct Session {
-    active_plot_mode: PlotMode,
-
-    viewport_2d: PlotViewport2d,
-    renderer_2d: PlotRenderer2d,
-    samples_2d: usize,
-
-    viewport_3d: PlotViewport3d,
-    renderer_3d: PlotRenderer3d,
-    camera_3d: Camera,
-    transform_3d: Transform,
-    samples_3d: (usize, usize),
-
-    last_plots: HashMap<usize, LastPlot>,
-}
+pub struct Session;
 
 impl Session {
     /**
-     * Render (x, f(x)) points onto buffer using viewport/renderer settings
+     * Replace current PlotState's content with the newly
+     * built CurvePlot or SurfacePlot built from the given
+     * expression string, PlotMode, and animation mode
      */
-    pub fn render_2d(&self, points: &[Point], buffer: &mut Buffer) {
-        self.renderer_2d.render(
-            points,
-            &self.viewport_2d,
-            buffer,
-        );
-    }
-
-    /**
-     * Render (x, y, z) points onto buffer using viewport/renderer settings
-     */
-    pub fn render_3d(&self, surface: &Object, buffer: &mut Buffer) {
-        self.renderer_3d.render(
-            surface, 
-            &self.viewport_3d,
-            &self.camera_3d,
-            buffer,
-        );
-    }
-
-    fn plot_for_pane(
+    fn replace_plot(
         &mut self,
-        pane_id: usize,
+        plot_state: &mut PlotState,
         expression: String,
         mode: PlotMode,
         animated: bool,
     ) -> Result<SessionOutput, String> {
-        let output = match mode {
+        let (content, title) = match mode {
             PlotMode::TwoD => {
-                self.build_plot_2d(expression.clone(), animated)?
+                let curve = self.build_curve(
+                    &plot_state.view_2d, 
+                    &expression, 
+                    animated,
+                )?;
+
+                (PlotContent::TwoD(curve), format!(" y = {expression} "))
             }
             PlotMode::ThreeD => {
-                self.build_plot_3d(expression.clone(), animated)?
+                let surface = self.build_surface(
+                    &plot_state.view_3d,
+                    &expression,
+                    animated,
+                )?;
+
+                (PlotContent::ThreeD(surface), format!(" z = {expression} "))
             }
         };
 
-        // Replace history after successfully building the plot
-        self.last_plots.insert(
-            pane_id,
-            LastPlot {
-                expression,
-                mode,
-                animated,
-            }
-        );
+        plot_state.content = content;
+        plot_state.last_plot = Some(LastPlot { 
+            expression,
+            mode,
+            animated,
+        });
 
-        Ok(output)
+        Ok(SessionOutput::PlotUpdated { title })
     }
 
     /**
@@ -113,30 +79,27 @@ impl Session {
      * identifier nodes (x, t if animated), and computes y = f(x) samples to
      * build a Widget for PaneContent
      */
-    fn build_plot_2d(
+    fn build_curve(
         &self,
-        expression: String,
+        view_2d: &PlotView2d,
+        expression: &str,
         animated: bool,
-    ) -> Result<SessionOutput, String> {
+    ) -> Result<CurvePlot, String> {
         // Tokenize / parse expression into AST 
-        let mut tokenizer = Tokenizer::new(&expression);
-        let tokens = tokenizer.tokenize()?;
-
-        let mut parser = Parser::new(tokens);
-        let tree = parser.parse_expression(0)?;
+        let tree = TokenNode::new(expression)?;
 
         // Validate variable identifiers
-        tree.validate_variables(2, animated)?;
+        tree.validate_variables(PlotMode::TwoD, animated)?;
 
         // Perform initial sample with t = 0
         // - No effect if not animated
-        let mut points = Vec::with_capacity(self.samples_2d);
+        let mut points = Vec::with_capacity(view_2d.samples);
 
         sample_curve_at(
             &tree,
-            self.viewport_2d.x_min,
-            self.viewport_2d.x_max,
-            self.samples_2d,
+            view_2d.viewport.x_min,
+            view_2d.viewport.x_max,
+            view_2d.samples,
             0.0,
             &mut points,
         ); 
@@ -144,7 +107,6 @@ impl Session {
         // Define animation parameters if enabled
         let animation = if animated {
             Some(Animation {
-                expression: tree,
                 time: 0.0,
                 speed: 1.0,
                 period: 5.0,
@@ -155,19 +117,14 @@ impl Session {
             None
         };
 
-        // Create Widget for PaneContent
-        let widget = PlotWidget2d::new(
+        // Build 2D CurvePlot
+        let curve = CurvePlot {
+            expression: tree,
             points,
-            self.samples_2d,
-            self.viewport_2d,
-            self.renderer_2d.clone(),
             animation,
-        );
+        };
 
-        Ok(SessionOutput::Plot {
-            title: format!(" y = {expression} "),
-            content: PaneContent::Plot2d(widget),
-        })
+        Ok(curve)
     }
 
     /**
@@ -175,25 +132,22 @@ impl Session {
      * identifier nodes (x, y, t if animated), and computes 
      * z = f(x, y) samples to build a Widget for PaneContent
      */
-    fn build_plot_3d(
+    fn build_surface(
         &self,
-        expression: String,
+        view_3d: &PlotView3d,
+        expression: &str,
         animated: bool,
-    ) -> Result<SessionOutput, String> {
+    ) -> Result<SurfacePlot, String> {
         // Tokenize / parse expression into AST 
-        let mut tokenizer = Tokenizer::new(&expression);
-        let tokens = tokenizer.tokenize()?;
-
-        let mut parser = Parser::new(tokens);
-        let tree = parser.parse_expression(0)?;
+        let tree = TokenNode::new(expression)?;
 
         // Validate variable identifiers
-        tree.validate_variables(3, animated)?;
+        tree.validate_variables(PlotMode::ThreeD, animated)?;
 
         // Create placehold Mesh grid to compute samples
         // - Placeholder function z = 0, ensuring all finite vertices initially
-        let viewport = &self.viewport_3d;
-        let (x_samples, y_samples) = self.samples_3d;
+        let viewport = view_3d.viewport;
+        let (x_samples, y_samples) = view_3d.samples;
 
         let mut mesh = Mesh::surface(
             viewport.x_min,
@@ -210,7 +164,6 @@ impl Session {
         // Define animation parameters if enabled
         let animation = if animated {
             Some(Animation {
-                expression: tree,
                 time: 0.0,
                 speed: 1.0,
                 period: 5.0,
@@ -221,60 +174,67 @@ impl Session {
             None
         };
 
-        // Create Widget for PaneContent
-        let widget = PlotWidget3d::new(
-            Object::new(mesh, self.transform_3d),
-            self.camera_3d.clone(),
-            self.viewport_3d,
-            self.renderer_3d.clone(),
+        // Build 3D SurfacePlot
+        let surface = SurfacePlot {
+            expression: tree,
+            mesh,
             animation,
-        );
+        };
 
-        Ok(SessionOutput::Plot { 
-            title: format!(" z = {expression} "), 
-            content: PaneContent::Plot3d(widget) 
-        })
+        Ok(surface)
     }
 
     pub fn execute(
         &mut self, 
-        pane_id: usize,
+        plot_state: &mut PlotState,
         command: Command
     ) -> Result<SessionOutput, String> {
         match command {
             // -------------------------
-            // Plot / Plot3d / Replot
+            // Plot / Plot2d / Plot3d / Replot
             // -------------------------
             Command::Plot(expression) => {
-                self.plot_for_pane(
-                    pane_id,
+                self.replace_plot(
+                    plot_state,
                     expression,
-                    self.active_plot_mode,
+                    plot_state.active_plot_mode,
                     false,
                 )
             }
 
+            Command::Plot2d(expression) => {
+                let output = self.replace_plot(
+                    plot_state, 
+                    expression, 
+                    PlotMode::TwoD, 
+                    false,
+                )?;
+
+                plot_state.active_plot_mode = PlotMode::TwoD;
+                Ok(output)
+            }
+
             Command::Plot3d(expression) => {
-                let output = self.plot_for_pane(
-                    pane_id,
+                let output = self.replace_plot(
+                    plot_state,
                     expression,
                     PlotMode::ThreeD,
                     false,
                 )?;
 
-                self.active_plot_mode = PlotMode::ThreeD;
+                plot_state.active_plot_mode = PlotMode::ThreeD;
                 Ok(output)
             }
 
             Command::Replot => {
-                let Some(last) = self.last_plots.get(&pane_id).cloned() else {
+                let Some(last) = plot_state.last_plot.clone() else {
                     return Ok(SessionOutput::Message(
                         "This pane has no previous plot".into(),
                     ));
                 };
 
-                self.plot_for_pane(
-                    pane_id,
+                self.replace_plot(
+                    plot_state,
                     last.expression,
                     last.mode,
                     last.animated,
@@ -285,23 +245,35 @@ impl Session {
             // Animate / Animate3d
             // -------------------------
             Command::Animate(expression) => {
-                self.plot_for_pane(
-                    pane_id,
+                self.replace_plot(
+                    plot_state,
                     expression,
-                    self.active_plot_mode,
+                    plot_state.active_plot_mode,
                     true,
                 )
             }
 
+            Command::Animate2d(expression) => {
+                let output = self.replace_plot(
+                    plot_state,
+                    expression,
+                    PlotMode::TwoD,
+                    true,
+                )?;
+
+                plot_state.active_plot_mode = PlotMode::TwoD;
+                Ok(output)
+            }
+
             Command::Animate3d(expression) => {
-                let output = self.plot_for_pane(
-                    pane_id,
+                let output = self.replace_plot(
+                    plot_state,
                     expression,
                     PlotMode::ThreeD,
                     true,
                 )?;
 
-                self.active_plot_mode = PlotMode::ThreeD;
+                plot_state.active_plot_mode = PlotMode::ThreeD;
                 Ok(output)
             }
 
@@ -317,7 +289,7 @@ impl Session {
             }
 
             Command::SetDimension(dimension) => {
-                self.active_plot_mode = match dimension {
+                plot_state.active_plot_mode = match dimension {
                     2 => PlotMode::TwoD,
                     3 => PlotMode::ThreeD,
                     _ => return Ok(SessionOutput::Message("plot dimension must be 2 or 3".into())),
@@ -341,13 +313,13 @@ impl Session {
                     return Ok(SessionOutput::Message("y_min must be less than y_max".into()));
                 }
 
-                match self.active_plot_mode {
+                match plot_state.active_plot_mode {
                     PlotMode::TwoD => {
                         if z_bounds.is_some() {
                             return Ok(SessionOutput::Message("2D view expects x and y bounds only".into()));
                         }
 
-                        self.viewport_2d = PlotViewport2d {
+                        plot_state.view_2d.viewport = PlotViewport2d {
                             x_min,
                             x_max,
                             y_min,
@@ -363,7 +335,7 @@ impl Session {
                             return Ok(SessionOutput::Message("z_min must be less than z_max".into()));
                         }
 
-                        self.viewport_3d = PlotViewport3d {
+                        plot_state.view_3d.viewport = PlotViewport3d {
                             x_min,
                             x_max,
                             y_min,
@@ -378,7 +350,7 @@ impl Session {
             }
 
             Command::SetProjection(proj) => {
-                self.camera_3d.projection = proj;
+                plot_state.view_3d.camera.projection = proj;
 
                 Ok(SessionOutput::None)
             }
@@ -388,43 +360,43 @@ impl Session {
                     return Ok(SessionOutput::Message("samples must be at least 2".into()));
                 }
 
-                match self.active_plot_mode {
-                    PlotMode::TwoD => self.samples_2d = samples,
-                    PlotMode::ThreeD => self.samples_3d = (samples, samples),
+                match plot_state.active_plot_mode {
+                    PlotMode::TwoD => plot_state.view_2d.samples = samples,
+                    PlotMode::ThreeD => plot_state.view_3d.samples = (samples, samples),
                 }
                 Ok(SessionOutput::None)
             }
 
             Command::ShowAxes(show) => {
-                match self.active_plot_mode {
-                    PlotMode::TwoD => self.renderer_2d.show_axes = show,
-                    PlotMode::ThreeD => self.renderer_3d.show_axes = show,
+                match plot_state.active_plot_mode {
+                    PlotMode::TwoD => plot_state.view_2d.renderer.show_axes = show,
+                    PlotMode::ThreeD => plot_state.view_2d.renderer.show_axes = show,
                 }
                 Ok(SessionOutput::None)
             }
             
             Command::ShowTicks(show) => {
-                match self.active_plot_mode {
-                    PlotMode::TwoD => self.renderer_2d.show_ticks = show,
+                match plot_state.active_plot_mode {
+                    PlotMode::TwoD => plot_state.view_2d.renderer.show_ticks = show,
                     PlotMode::ThreeD => {
-                        self.renderer_3d.axes_renderer.show_ticks = show;
-                        self.renderer_3d.axes_renderer.show_labels = show;
+                        plot_state.view_3d.renderer.axes_renderer.show_ticks = show;
+                        plot_state.view_3d.renderer.axes_renderer.show_labels = show;
                     }
                 }
                 Ok(SessionOutput::None)
             }
 
             Command::ShowBorder(show) => {
-                match self.active_plot_mode {
-                    PlotMode::TwoD => self.renderer_2d.show_border = show,
-                    PlotMode::ThreeD => self.renderer_3d.show_border = show,
+                match plot_state.active_plot_mode {
+                    PlotMode::TwoD => plot_state.view_2d.renderer.show_border = show,
+                    PlotMode::ThreeD => plot_state.view_3d.renderer.show_border = show,
                 }
                 Ok(SessionOutput::None)
             }
 
             Command::Config => {
                 Ok(SessionOutput::Message(
-                    self.config_text()
+                    self.config_text(plot_state)
                 ))
             }
 
@@ -441,17 +413,19 @@ impl Session {
     }
 
     /**
-     * Forget pane's plot history upon removal
-     */
-    pub fn forget_pane(&mut self, pane_id: usize) {
-        self.last_plots.remove(&pane_id);
-    }
-
-    /**
      * Print current PlotViewport / PlotRenderer configuration
      */
-    fn config_text(&self) -> String {
-        let active_settings = match self.active_plot_mode {
+    fn config_text(&self, plot_state: &PlotState) -> String {
+        let viewport_2d = &plot_state.view_2d.viewport;
+        let renderer_2d = &plot_state.view_2d.renderer;
+        let samples_2d = plot_state.view_2d.samples;
+
+        let viewport_3d = &plot_state.view_3d.viewport;
+        let renderer_3d = &plot_state.view_3d.renderer;
+        let samples_3d = plot_state.view_3d.samples;
+        let camera_3d = &plot_state.view_3d.camera;
+
+        let active_settings = match plot_state.active_plot_mode {
             PlotMode::TwoD => format!(
             r#"
 Current settings
@@ -463,15 +437,15 @@ Current settings
   Ticks              {}
   Border             {}
 "#,
-            self.viewport_2d.x_min,
-            self.viewport_2d.y_min,
-            self.viewport_2d.x_max,
-            self.viewport_2d.y_max,
-            self.camera_3d.projection,
-            self.samples_2d,
-            on_off(self.renderer_2d.show_axes),
-            on_off(self.renderer_2d.show_ticks),
-            on_off(self.renderer_2d.show_border),
+            viewport_2d.x_min,
+            viewport_2d.y_min,
+            viewport_2d.x_max,
+            viewport_2d.y_max,
+            camera_3d.projection,
+            samples_2d,
+            on_off(renderer_2d.show_axes),
+            on_off(renderer_2d.show_ticks),
+            on_off(renderer_2d.show_border),
             ),
             PlotMode::ThreeD => format!(
             r#"
@@ -484,18 +458,18 @@ Current settings
   Ticks              {}
   Border             {}
 "#,
-                self.viewport_3d.x_min,
-                self.viewport_3d.y_min,
-                self.viewport_3d.z_min,
-                self.viewport_3d.x_max,
-                self.viewport_3d.y_max,
-                self.viewport_3d.z_max,
-                self.camera_3d.projection,
-                self.samples_3d.0,
-                self.samples_3d.1,
-                on_off(self.renderer_3d.show_axes),
-                on_off(self.renderer_3d.axes_renderer.show_ticks),
-                on_off(self.renderer_3d.show_border),
+                viewport_3d.x_min,
+                viewport_3d.y_min,
+                viewport_3d.z_min,
+                viewport_3d.x_max,
+                viewport_3d.y_max,
+                viewport_3d.z_max,
+                camera_3d.projection,
+                samples_3d.0,
+                samples_3d.1,
+                on_off(renderer_3d.show_axes),
+                on_off(renderer_3d.axes_renderer.show_ticks),
+                on_off(renderer_3d.show_border),
             ),
         };
 
@@ -556,26 +530,4 @@ Current settings
 
 fn on_off(value: bool) -> &'static str {
     if value { "on" } else { "off" }
-}
-
-impl Default for Session {
-    fn default() -> Self {
-        Self {
-            active_plot_mode: PlotMode::TwoD,
-
-            // 2D
-            viewport_2d: PlotViewport2d::default(),
-            renderer_2d: PlotRenderer2d::default(),
-            samples_2d: 500,
-            
-            // 3D
-            viewport_3d: PlotViewport3d::default(),
-            renderer_3d: PlotRenderer3d::default(),
-            camera_3d: Camera::default(),
-            transform_3d: Transform::default(),
-            samples_3d: (10, 10),
-
-            last_plots: HashMap::new(),
-        }
-    }
 }

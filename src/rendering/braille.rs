@@ -32,7 +32,7 @@ impl Default for BrailleCell {
     }
 }
 
-pub(crate) struct BrailleBuffer {
+pub struct BrailleBuffer {
     cell_width: usize,
     cell_height: usize,
     cells: Vec<BrailleCell>,
@@ -170,45 +170,13 @@ impl BrailleBuffer {
         }
     }
 
-    pub fn composite(&self, buffer: &mut Buffer) -> (Vec<Option<usize>>, Vec<Option<usize>>) {
-        // Track top and bottom border cells (terminal dims), initializing each column to None
-        let mut top: Vec<Option<usize>> = vec![None; self.cell_width];
-        let mut bot: Vec<Option<usize>> = vec![None; self.cell_width];
-
-        // Track top and bottom border dots (braille dims)
-        let mut top_dots: Vec<Option<usize>> = vec![None; self.width()];
-        let mut bot_dots: Vec<Option<usize>> = vec![None; self.width()];
-
+    pub fn composite(&self, buffer: &mut Buffer) {
         for y in 0..self.cell_height {
             for x in 0..self.cell_width {
                 let cell = self.cells[y * self.cell_width + x];
 
                 if cell.dots == 0 {
                     continue;
-                }
-
-                // Update column's min/max filled CELLS
-                top[x].get_or_insert(y);    // First occupied cell is the top
-                bot[x] = Some(y);           // Latest occupied cell is the bottom
-
-                // Update column's min/max filled DOTS
-                for dot_x in 0..2 {
-                    // Convert from terminal x -> braille dot x
-                    // - Terminal cell x * 2 + dot x offset
-                    let braille_x = x * 2 + dot_x;
-
-                    // Find first occupied dot row in this half of the cell
-                    // - Check four rows for first filled dot
-                    if let Some(dot_y) = (0..4).find(|&dy| cell.dots & DOT_BITS[dy][dot_x] != 0)
-                    {
-                        top_dots[braille_x].get_or_insert(y * 4 + dot_y);
-                    }
-
-                    // Last occupied dot row in this half of the cell
-                    if let Some(dot_y) = (0..4).rev().find(|&dy| cell.dots & DOT_BITS[dy][dot_x] != 0)
-                    {
-                        bot_dots[braille_x] = Some(y * 4 + dot_y);
-                    }
                 }
 
                 // The cell already contains the nearest layer selected by
@@ -224,77 +192,5 @@ impl BrailleBuffer {
                 );
             }
         }
-
-        // Color top/bottom cells
-        let top_color = Color::Rgb(255, 100, 100);
-        let bottom_color = Color::Rgb(100, 150, 255);
-
-        for x in 0..self.cell_width {
-            if let Some(y) = top[x] {
-                let cell = buffer.get(x, y).with_fg(top_color);
-                buffer.set(x as isize, y as isize, cell);
-            }
-
-            if let Some(y) = bot[x] {
-                if Some(y) != top[x] {
-                    let cell = buffer.get(x, y).with_fg(bottom_color);
-                    buffer.set(x as isize, y as isize, cell);
-                }
-            }
-        }
-
-        (top_dots, bot_dots)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn packs_all_eight_dots_into_one_character() {
-        let mut braille = BrailleBuffer::new(1, 1);
-
-        for y in 0..4 {
-            for x in 0..2 {
-                braille.set(x, y, Color::Default);
-            }
-        }
-
-        let mut buffer = Buffer::new(1, 1);
-        braille.composite(&mut buffer);
-
-        assert_eq!(buffer.get(0, 0).ch, '⣿');
-    }
-
-    #[test]
-    fn replaces_an_existing_braille_layer_cleanly() {
-        let mut buffer = Buffer::new(1, 1);
-        buffer.set(0, 0, Cell::new('⣿'));
-
-        let mut braille = BrailleBuffer::new(1, 1);
-        braille.set(0, 0, Color::Default);
-        braille.composite(&mut buffer);
-
-        assert_eq!(buffer.get(0, 0).ch, '⠁');
-    }
-
-    #[test]
-    fn keeps_the_nearer_layer_at_a_crossing() {
-        let surface = Color::Rgb(0, 200, 255);
-        let axis = Color::Rgb(255, 0, 0);
-        let mut braille = BrailleBuffer::new(2, 1);
-
-        // In cell zero the surface is nearer; in cell one the axis is nearer.
-        braille.set_depth(0, 0, -0.5, 0, surface);
-        braille.set_depth(1, 0, 0.5, 1, axis);
-        braille.set_depth(2, 0, 0.5, 0, surface);
-        braille.set_depth(3, 0, -0.5, 1, axis);
-
-        let mut buffer = Buffer::new(2, 1);
-        braille.composite(&mut buffer);
-
-        assert_eq!(buffer.get(0, 0), Cell::new('⠁').with_fg(surface));
-        assert_eq!(buffer.get(1, 0), Cell::new('⠈').with_fg(axis));
     }
 }

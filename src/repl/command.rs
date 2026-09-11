@@ -21,10 +21,12 @@ pub enum Command {
     ShowBorder(bool),
 
     Plot(String),
+    Plot2d(String),
     Plot3d(String),
     Replot,
 
     Animate(String),
+    Animate2d(String),
     Animate3d(String),
     Pause,
     Resume,
@@ -73,21 +75,23 @@ impl Command {
             ["c"] | ["config"] | ["cfg"] => Ok(Command::Config),
             ["r"] | ["replot"]           => Ok(Command::Replot),
             
-            ["v", args @ ..] | ["view", args @ ..] | ["set", "view", args @ ..] 
+            ["view", args @ ..] | ["set", "view", args @ ..] 
                 => Self::parse_set_view(args),
-            ["p", val] | ["proj", val] | ["set", "proj", val] 
+            ["proj", val] | ["set", "proj", val] 
                 => Self::parse_set_projection(val),
-            ["d", val] | ["dim", val] | ["set", "dim", val] 
+            ["dim", val] | ["set", "dim", val] 
                 => Self::parse_set_dimension(val),
-            ["s", val] | ["samples", val] | ["set", "samples", val] 
+            ["samples", val] | ["set", "samples", val] 
                 => Self::parse_set_samples(val),
-
             ["show", args @ ..]   => Self::parse_show(args),
-            ["plot", args @ ..]   => Self::parse_plot(args),
-            ["plot3d", args @ ..] => Self::parse_plot3d(args),
 
-            ["animate", args @ ..]   => Self::parse_animate(args),
-            ["animate3d", args @ ..] => Self::parse_animate3d(args),
+            ["p", args @ ..]  | ["plot", args @ ..]   => Self::parse_plot(args),
+            ["p2", args @ ..] | ["plot2d", args @ ..] => Self::parse_plot2d(args),
+            ["p3", args @ ..] | ["plot3d", args @ ..] => Self::parse_plot3d(args),
+
+            ["a", args @ ..]  | ["animate", args @ ..]   => Self::parse_animate(args),
+            ["a2", args @ ..] | ["animate2d", args @ ..] => Self::parse_animate2d(args),
+            ["a3", args @ ..] | ["animate3d", args @ ..] => Self::parse_animate3d(args),
 
             ["pause"]  => Ok(Command::Pause),
             ["resume"] => Ok(Command::Resume),
@@ -110,6 +114,14 @@ impl Command {
     }
 
     // -------------------------
+    // termview> plot2d <function>
+    // -------------------------
+    fn parse_plot2d(args: &[&str]) -> Result<Command, String> {
+        let function_str = args.join("");
+        Ok(Command::Plot2d(function_str))
+    }
+
+    // -------------------------
     // termview> plot3d <function of x and y>
     // -------------------------
     fn parse_plot3d(args: &[&str]) -> Result<Command, String> {
@@ -124,6 +136,15 @@ impl Command {
         // Remove whitespace / combine into String
         let function_str = args.join("");
         Ok(Command::Animate(function_str))
+    }
+
+    // -------------------------
+    // termview> animate2d <function>
+    // -------------------------
+    fn parse_animate2d(args: &[&str]) -> Result<Command, String> {
+        // Remove whitespace / combine into String
+        let function_str = args.join("");
+        Ok(Command::Animate2d(function_str))
     }
 
     // -------------------------

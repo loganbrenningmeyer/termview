@@ -1,5 +1,5 @@
 use crate::{
-    geometry::{Object, Vertex}, 
+    geometry::{Mesh, Vertex}, 
     math::{Mat4, Transform, Vec3, Vec4},
 };
 use super::{
@@ -52,16 +52,15 @@ pub struct WireframeRenderer;
  */
 impl WireframeRenderer {
     /**
-     * Frame entry point. Compute camera view matrix per-frame,
-     * not per-object. 
-     * - Computes model-view-projection matrices for each object
+     * - Computes model-view-projection matrices
      *      MVP = projection * view * model (reverse application)
      * - Projects vertices onto 2D screen
      * - Draws vertices / edges onto buffer
      */
     pub fn render(
         &self,
-        objects: &[Object],
+        mesh: &Mesh,
+        transform: Transform,
         camera: &Camera,
         style: WireframeStyle,
         buffer: &mut Buffer,
@@ -72,36 +71,34 @@ impl WireframeRenderer {
         // [model matrix...] -> view matrix -> projection matrix
         let view = camera.view();
 
-        for object in objects {
-            // Projection * View * Model == Model → View → Projection
-            let mvp = proj * view * object.transform.matrix();
+        // Projection * View * Model == Model → View → Projection
+        let mvp = proj * view * transform.matrix();
 
-            // Project vertex coordinates onto screen
-            let vertices = &object.mesh.vertices;
+        // Project vertex coords onto screen
+        let vertices = &mesh.vertices;
 
-            let proj_verts: Vec<Option<ScreenPoint>> = vertices
-                .iter()
-                .map(|v| self.project_vertex(
-                    v, 
-                    &mvp, 
-                    buffer,
-                ))
-                .collect();
+        let proj_verts: Vec<Option<ScreenPoint>> = vertices
+            .iter()
+            .map(|v| self.project_vertex(
+                v, 
+                &mvp, 
+                buffer,
+            ))
+            .collect();
 
-            // Render edges
-            // - Ensure that vertices are Some() before render
-            for edge in &object.mesh.edges {
-                if let (Some(a), Some(b)) =
-                    (proj_verts[edge.idx0], proj_verts[edge.idx1])
-                {
-                    self.render_edge(&a, &b, style, buffer);
-                }
+        // Render edges
+        // - Ensure that vertices are Some() before render
+        for edge in &mesh.edges {
+            if let (Some(a), Some(b)) =
+                (proj_verts[edge.idx0], proj_verts[edge.idx1])
+            {
+                self.render_edge(&a, &b, style, buffer);
             }
+        }
 
-            // Set vertex characters on Canvas
-            for p in proj_verts.iter().flatten() {
-                buffer.set(p.x, p.y, style.vertex);
-            }
+        // Set vertex characters on Canvas
+        for p in proj_verts.iter().flatten() {
+            buffer.set(p.x, p.y, style.vertex);
         }
     }
 
@@ -111,81 +108,85 @@ impl WireframeRenderer {
      */
     pub fn render_braille(
         &self,
-        objects: &[Object],
+        mesh: &Mesh,
+        transform: Transform,
         camera: &Camera,
         style: WireframeStyle,
         buffer: &mut Buffer,
     ) {
         let display_aspect = buffer.display_aspect();
-        let mut braille = BrailleBuffer::new(buffer.width(), buffer.height());
+        let mut braille = BrailleBuffer::new(
+            buffer.width(), 
+            buffer.height(),
+        );
 
         self.render_braille_into(
-            objects,
-            camera,
+            mesh,
+            transform,
+            &camera,
             style,
             display_aspect,
             0,
             &mut braille,
         );
 
+        // Write braille characters into output buffer
         braille.composite(buffer);
     }
 
-    pub(crate) fn render_braille_into(
+    pub fn render_braille_into(
         &self,
-        objects: &[Object],
+        mesh: &Mesh,
+        transform: Transform,
         camera: &Camera,
         style: WireframeStyle,
         display_aspect: f64,
         layer: u8,
         braille: &mut BrailleBuffer,
     ) {
+        // Construct MVP matrix
         let proj = camera.projection.matrix(display_aspect);
         let view = camera.view();
+        let mvp = proj * view * transform.matrix();
 
-        for object in objects {
-            let mvp = proj * view * object.transform.matrix();
+        let proj_verts: Vec<Option<ScreenPoint>> = mesh
+            .vertices
+            .iter()
+            .map(|vertex| {
+                self.mvp_ndc_to_screen_dimensions(
+                    vertex.position,
+                    &mvp,
+                    braille.width(),
+                    braille.height(),
+                )
+            })
+            .collect();
 
-            let projected: Vec<Option<ScreenPoint>> = object
-                .mesh
-                .vertices
-                .iter()
-                .map(|vertex| {
-                    self.mvp_ndc_to_screen_dimensions(
-                        vertex.position,
-                        &mvp,
-                        braille.width(),
-                        braille.height(),
-                    )
-                })
-                .collect();
-
-            for edge in &object.mesh.edges {
-                if let (Some(a), Some(b)) =
-                    (projected[edge.idx0], projected[edge.idx1])
-                {
-                    braille.draw_line_depth(
-                        a.x,
-                        a.y,
-                        a.depth,
-                        b.x,
-                        b.y,
-                        b.depth,
-                        layer,
-                        style.edge.fg,
-                    );
-                }
-            }
-
-            for point in projected.iter().flatten() {
-                braille.set_depth(
-                    point.x,
-                    point.y,
-                    point.depth,
+        for edge in &mesh.edges {
+            if let (Some(a), Some(b)) =
+                (proj_verts[edge.idx0], proj_verts[edge.idx1])
+            {
+                braille.draw_line_depth(
+                    a.x,
+                    a.y,
+                    a.depth,
+                    b.x,
+                    b.y,
+                    b.depth,
                     layer,
-                    style.vertex.fg,
+                    style.edge.fg,
                 );
             }
+        }
+
+        for point in proj_verts.iter().flatten() {
+            braille.set_depth(
+                point.x,
+                point.y,
+                point.depth,
+                layer,
+                style.vertex.fg,
+            );
         }
     }
 

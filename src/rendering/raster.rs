@@ -1,9 +1,23 @@
 use super::{Buffer, Cell, Color, PlotArea2d, PlotViewport2d};
 
+const TOP_LEFT: char = '┌';
+const TOP_RIGHT: char = '┐';
+const BOTTOM_LEFT: char = '└';
+const BOTTOM_RIGHT: char = '┘';
+
+const TOP_LEFT_RD: char = '╭';
+const TOP_RIGHT_RD: char = '╮';
+const BOTTOM_LEFT_RD: char = '╰';
+const BOTTOM_RIGHT_RD: char = '╯';
+
+const HORIZONTAL: char = '─';
+const VERTICAL: char = '│';
+
+
 /**
  * Draws rectangular border around buffer edges
  */
-pub fn draw_border(buffer: &mut Buffer, color: Color) {
+pub fn draw_border(buffer: &mut Buffer, color: Color, round: bool) {
     // Convert usize to isize safely
     let (Ok(width), Ok(height)) = (
         isize::try_from(buffer.width()),
@@ -14,21 +28,26 @@ pub fn draw_border(buffer: &mut Buffer, color: Color) {
 
     // Vertical
     for y in 0..height {
-        buffer.set(0, y, Cell::new('│').with_fg(color));
-        buffer.set(width - 1, y, Cell::new('│').with_fg(color));
+        buffer.set(0, y, Cell::new(VERTICAL).with_fg(color));
+        buffer.set(width - 1, y, Cell::new(VERTICAL).with_fg(color));
     }
 
     // Horizontal
     for x in 0..width {
-        buffer.set(x, 0, Cell::new('─').with_fg(color));
-        buffer.set(x, height - 1, Cell::new('─').with_fg(color));
+        buffer.set(x, 0, Cell::new(HORIZONTAL).with_fg(color));
+        buffer.set(x, height - 1, Cell::new(HORIZONTAL).with_fg(color));
     }
 
     // Corners
-    buffer.set(0, 0, Cell::new('┌').with_fg(color));
-    buffer.set(width - 1, 0, Cell::new('┐').with_fg(color));
-    buffer.set(0, height - 1, Cell::new('└').with_fg(color));
-    buffer.set(width - 1, height - 1, Cell::new('┘').with_fg(color));
+    let top_left = if round { TOP_LEFT_RD } else { TOP_LEFT };
+    let top_right = if round { TOP_RIGHT_RD } else { TOP_RIGHT };
+    let bottom_left = if round { BOTTOM_LEFT_RD } else { BOTTOM_LEFT };
+    let bottom_right = if round { BOTTOM_RIGHT_RD } else { BOTTOM_RIGHT };
+
+    buffer.set(0, 0, Cell::new(top_left).with_fg(color));
+    buffer.set(width - 1, 0, Cell::new(top_right).with_fg(color));
+    buffer.set(0, height - 1, Cell::new(bottom_left).with_fg(color));
+    buffer.set(width - 1, height - 1, Cell::new(bottom_right).with_fg(color));
 }
 
 /**

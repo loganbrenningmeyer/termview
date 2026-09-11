@@ -1,5 +1,6 @@
 use crate::{
-    geometry::Object,
+    math::Transform,
+    geometry::Mesh,
     rendering::{draw_border, AxesStyle3d, BrailleBuffer, Cell, Color, WireframeStyle},
 };
 use super::{AxesRenderer3d, Buffer, Camera, WireframeRenderer};
@@ -72,7 +73,8 @@ impl Default for PlotRenderer3d {
 impl PlotRenderer3d {
     pub fn render(
         &self,
-        surface: &Object,
+        mesh: &Mesh,
+        transform: Transform,
         viewport: &PlotViewport3d,
         camera: &Camera,
         buffer: &mut Buffer,
@@ -81,7 +83,8 @@ impl PlotRenderer3d {
         let mut braille = BrailleBuffer::new(buffer.width(), buffer.height());
 
         self.surface_renderer.render_braille_into(
-            std::slice::from_ref(surface),
+            mesh,
+            transform,
             camera,
             self.style.surface,
             display_aspect,
@@ -93,7 +96,7 @@ impl PlotRenderer3d {
             self.axes_renderer.render_lines_braille(
                 &self.surface_renderer,
                 viewport,
-                surface.transform,
+                transform,
                 camera,
                 self.style.axes,
                 display_aspect,
@@ -107,7 +110,7 @@ impl PlotRenderer3d {
             self.axes_renderer.render_annotations(
                 &self.surface_renderer,
                 viewport,
-                surface.transform,
+                transform,
                 camera,
                 self.style.axes,
                 buffer,
@@ -115,7 +118,7 @@ impl PlotRenderer3d {
         }
 
         if self.show_border {
-            draw_border(buffer, self.style.border);
+            draw_border(buffer, self.style.border, true);
         }
     }
 }
