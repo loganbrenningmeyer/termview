@@ -9,7 +9,7 @@ use std::{
 use termview::{
     geometry::Point,
     math::rangef,
-    rendering::{Color, PlotAspect, PlotRenderer, PlotStyle, PlotViewport},
+    rendering::{Color, PlotAspect2d, PlotRenderer2d, PlotStyle2d, PlotViewport2d},
     terminal::{self as term, TerminalPresenter},
 };
 
@@ -18,7 +18,7 @@ const FRAME_TIME: Duration = Duration::from_micros(16_667);
 const DEMO_DURATION: Duration = Duration::from_secs(30);
 
 fn main() -> io::Result<()> {
-    let viewport = PlotViewport {
+    let viewport = PlotViewport2d {
         x_min: -4.0,
         x_max: 4.0,
         y_min: -4.0,
@@ -30,11 +30,11 @@ fn main() -> io::Result<()> {
     let mut out = io::stdout().lock();
 
     let tick_color = Color::Rgb(220, 220, 160);
-    let mut renderer = PlotRenderer {
-        style: PlotStyle::default()
+    let mut renderer = PlotRenderer2d {
+        style: PlotStyle2d::default()
             .curve_color(Color::Rgb(80, 220, 120))
             .tick_color(tick_color),
-        aspect: PlotAspect::Equal {
+        aspect: PlotAspect2d::Equal {
             cell_aspect: CELL_ASPECT,
         },
         pad_width: 5,

@@ -3,12 +3,12 @@ use std::io;
 use termview::{
     geometry::Point,
     math::rangef,
-    rendering::{Color, PlotAspect, PlotRenderer, PlotStyle, PlotViewport},
+    rendering::{Color, PlotAspect2d, PlotRenderer2d, PlotStyle2d, PlotViewport2d},
     terminal::{self as term, TerminalPresenter},
 };
 
 fn main() -> io::Result<()> {
-    let viewport = PlotViewport {
+    let viewport = PlotViewport2d {
         x_min: -4.0,
         x_max: 4.0,
         y_min: -4.0,
@@ -26,13 +26,13 @@ fn main() -> io::Result<()> {
     let plot_color = Color::Rgb(80, 220, 120);
     let ticks_color = Color::Rgb(220, 220, 160);
 
-    let style = PlotStyle::default()
+    let style = PlotStyle2d::default()
         .curve_color(plot_color)
         .tick_color(ticks_color);
 
-    let renderer = PlotRenderer {
+    let renderer = PlotRenderer2d {
         style,
-        aspect: PlotAspect::Equal { cell_aspect },
+        aspect: PlotAspect2d::Equal { cell_aspect },
         pad_width: 5,
         pad_height: 5,
         ..Default::default()

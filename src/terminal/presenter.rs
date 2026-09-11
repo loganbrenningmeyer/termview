@@ -1,6 +1,6 @@
 use std::io::{self, Write};
 
-use crate::rendering::{Buffer, Color, PlotViewport};
+use crate::rendering::{Buffer, Color, PlotViewport2d};
 use super::{move_cursor, DEFAULT_COLOR, SYNC_BEGIN, SYNC_END};
 
 
@@ -135,7 +135,7 @@ pub fn canvas_dims() -> (usize, usize) {
 }
 
 pub fn canvas_viewport_dims(
-    viewport: &PlotViewport,
+    viewport: &PlotViewport2d,
     cell_aspect: f64,
 ) -> (usize, usize) {
     let (tw, th) = canvas_dims();

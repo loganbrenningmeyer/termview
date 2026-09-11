@@ -57,6 +57,25 @@ impl Buffer {
         }
     }
 
+    /**
+     * bit-block transfer, copy another buffer into
+     * the current buffer starting at a specified row/col
+     */
+    pub fn blit(&mut self, source: &Buffer, col: usize, row: usize) {
+        let width = source.width().min(self.width.saturating_sub(col));
+        let height = source.height().min(self.height.saturating_sub(row));
+
+        for y in 0..height {
+            for x in 0..width {
+                self.set(
+                    (col + x) as isize,
+                    (row + y) as isize,
+                    source.get(x, y),
+                );
+            }
+        }
+    }
+
     pub fn width(&self) -> usize {
         self.width
     }

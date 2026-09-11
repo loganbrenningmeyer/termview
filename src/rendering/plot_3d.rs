@@ -1,8 +1,8 @@
 use crate::{
     geometry::Object,
-    rendering::{draw_border, Axes3dStyle, BrailleBuffer, Cell, Color, WireframeStyle},
+    rendering::{draw_border, AxesStyle3d, BrailleBuffer, Cell, Color, WireframeStyle},
 };
-use super::{Axes3dRenderer, Buffer, Camera, WireframeRenderer};
+use super::{AxesRenderer3d, Buffer, Camera, WireframeRenderer};
 
 
 #[derive(Debug, Clone, Copy)]
@@ -16,16 +16,17 @@ pub struct PlotViewport3d {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct Plot3dStyle {
+pub struct PlotStyle3d {
     pub surface: WireframeStyle,
-    pub axes: Axes3dStyle,
+    pub axes: AxesStyle3d,
     pub border: Color,
 }
 
-pub struct Plot3dRenderer {
+#[derive(Debug, Clone)]
+pub struct PlotRenderer3d {
     pub surface_renderer: WireframeRenderer,
-    pub axes_renderer: Axes3dRenderer,
-    pub style: Plot3dStyle,
+    pub axes_renderer: AxesRenderer3d,
+    pub style: PlotStyle3d,
     pub show_axes: bool,
     pub show_border: bool,
 }
@@ -43,32 +44,32 @@ impl Default for PlotViewport3d {
     }
 }
 
-impl Default for Plot3dStyle {
+impl Default for PlotStyle3d {
     fn default() -> Self {
         Self {
             surface: WireframeStyle {
                 edge: Cell::new('•').with_fg(Color::Rgb(80, 160, 190)),
                 vertex: Cell::new('●').with_fg(Color::Rgb(170, 230, 245)),
             },
-            axes: Axes3dStyle::default(),
+            axes: AxesStyle3d::default(),
             border: Color::Rgb(160, 160, 160),
         }
     }
 }
 
-impl Default for Plot3dRenderer {
+impl Default for PlotRenderer3d {
     fn default() -> Self {
         Self {
             surface_renderer: WireframeRenderer,
-            axes_renderer: Axes3dRenderer::default(),
-            style: Plot3dStyle::default(),
+            axes_renderer: AxesRenderer3d::default(),
+            style: PlotStyle3d::default(),
             show_axes: true,
-            show_border: false,
+            show_border: true,
         }
     }
 }
 
-impl Plot3dRenderer {
+impl PlotRenderer3d {
     pub fn render(
         &self,
         surface: &Object,

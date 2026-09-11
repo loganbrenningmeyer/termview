@@ -1,8 +1,11 @@
-use crate::{
-    math::{Mat4, Quaternion, Vec3}, 
-    rendering::Projection,
+use crate::math::{
+    Mat4, 
+    Projection, 
+    Quaternion, 
+    Vec3,
 };
 
+#[derive(Debug, Clone)]
 pub struct Camera {
     pub position: Vec3,
     pub rotation: Quaternion,
@@ -70,7 +73,7 @@ impl Camera {
      * Update camera position / rotation given azimuth, elevation, and distance,
      * oriented with +Z up
      */
-    pub fn update_camera_3d(&mut self) {
+    pub fn update(&mut self) {
         // Maps camera-local axes as follows:
         // right (+X)    -> world +Y
         // up (+Y)       -> world +Z
@@ -147,13 +150,14 @@ impl Default for Camera {
             orbit: CameraOrbit::default(),
         };
 
-        camera.update_camera_3d();
+        camera.update();
 
         camera
     }
 }
 
 
+#[derive(Debug, Clone)]
 pub struct CameraOrbit {
     pub azimuth: f64,
     pub elevation: f64,

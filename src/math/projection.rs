@@ -1,7 +1,7 @@
 use std::fmt;
 use crate::math::Mat4;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Projection {
     Perspective(PerspectiveProjection),
     Orthographic(OrthographicProjection),
@@ -39,7 +39,7 @@ impl fmt::Display for Projection {
 }
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PerspectiveProjection {
     pub fov_y: f64,
     pub near: f64,
@@ -102,7 +102,7 @@ impl Default for PerspectiveProjection {
 }
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct OrthographicProjection {
     pub size: f64,
     pub near: f64,

@@ -1,4 +1,8 @@
-use crate::rendering::{Projection, PerspectiveProjection, OrthographicProjection};
+use crate::math::{
+    Projection, 
+    PerspectiveProjection, 
+    OrthographicProjection,
+};
 
 pub enum Command {
     SetDimension(u8),
@@ -24,23 +28,52 @@ pub enum Command {
 
 impl Command {
     pub fn parse(line: &str) -> Result<Command, String> {
+        // Handle `y=...` or `z=...` plot commands before splitting whitespace
+        let line = line.trim().to_lowercase();
+
+        if let Some((left, right)) = line.split_once('=') {
+            let variable = left.trim();
+
+            if matches!(variable, "y" | "z") {
+                let expression = right.trim();
+
+                if expression.is_empty() {
+                    return Err(format!(
+                        "Expected an expression after {variable} ="
+                    ));
+                }
+
+                let args: Vec<&str> = expression.split_whitespace().collect();
+
+                return match variable {
+                    "y" => Self::parse_plot(&args),
+                    "z" => Self::parse_plot3d(&args),
+                    _ => unreachable!(),
+                };
+            }
+        }
+
         // Split args by whitespace
         let arguments: Vec<&str> = line.split_whitespace().collect();
 
         // Map to proper parser
         match arguments.as_slice() {
-            ["q"] | ["Q"] | ["quit"] | ["exit"] => Ok(Command::Quit),
-            ["h"] | ["H"] | ["help"] => Ok(Command::Help),
-            ["c"] | ["C"] | ["config"] | ["cfg"] => Ok(Command::Config),
-            ["replot"] => Ok(Command::Replot),
+            ["q"] | ["quit"] | ["exit"]  => Ok(Command::Quit),
+            ["h"] | ["help"]             => Ok(Command::Help),
+            ["c"] | ["config"] | ["cfg"] => Ok(Command::Config),
+            ["r"] | ["replot"]           => Ok(Command::Replot),
             
-            ["set", "view", args @ ..] => Self::parse_set_view(args),
-            ["set", "proj", val] => Self::parse_set_projection(val),
-            ["set", "dim", val] => Self::parse_set_dimension(val),
-            ["set", "samples", val] => Self::parse_set_samples(val),
+            ["v", args @ ..] | ["view", args @ ..] | ["set", "view", args @ ..] 
+                => Self::parse_set_view(args),
+            ["p", val] | ["proj", val] | ["set", "proj", val] 
+                => Self::parse_set_projection(val),
+            ["d", val] | ["dim", val] | ["set", "dim", val] 
+                => Self::parse_set_dimension(val),
+            ["s", val] | ["samples", val] | ["set", "samples", val] 
+                => Self::parse_set_samples(val),
 
-            ["show", args @ ..] => Self::parse_show(args),
-            ["plot", args @ ..] => Self::parse_plot(args),
+            ["show", args @ ..]   => Self::parse_show(args),
+            ["plot", args @ ..]   => Self::parse_plot(args),
             ["plot3d", args @ ..] => Self::parse_plot3d(args),
             
             [] => Err("Empty command".into()),

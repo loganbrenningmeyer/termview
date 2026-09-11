@@ -6,7 +6,7 @@ use crate::{
 };
 
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 struct AxisSpec {
     direction: Vec3,
     min: f64,
@@ -18,7 +18,7 @@ struct AxisSpec {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct Axes3dStyle {
+pub struct AxesStyle3d {
     pub x: WireframeStyle,
     pub y: WireframeStyle,
     pub z: WireframeStyle,
@@ -26,7 +26,8 @@ pub struct Axes3dStyle {
     pub label: Cell,
 }
 
-pub struct Axes3dRenderer {
+#[derive(Debug, Clone)]
+pub struct AxesRenderer3d {
     pub show_ticks: bool,
     pub show_labels: bool,
     pub ticks_per_axis: usize,
@@ -34,7 +35,7 @@ pub struct Axes3dRenderer {
     pub label_gap: f64,
 }
 
-impl Default for Axes3dStyle {
+impl Default for AxesStyle3d {
     fn default() -> Self {
         Self {
             x: WireframeStyle {
@@ -55,7 +56,7 @@ impl Default for Axes3dStyle {
     }
 }
 
-impl Default for Axes3dRenderer {
+impl Default for AxesRenderer3d {
     fn default() -> Self {
         Self {
             show_ticks: true,
@@ -67,7 +68,7 @@ impl Default for Axes3dRenderer {
     }
 }
 
-impl Axes3dRenderer {
+impl AxesRenderer3d {
     /**
      * Using WireframeRenderer, plots each 3D axis as a Braille wireframe
      * with two vertices and one edge, using the appropriate axis style.
@@ -78,7 +79,7 @@ impl Axes3dRenderer {
         viewport: &PlotViewport3d,
         transform: Transform,
         camera: &Camera,
-        style: Axes3dStyle,
+        style: AxesStyle3d,
         buffer: &mut Buffer,
     ) {
         let display_aspect = buffer.display_aspect();
@@ -105,7 +106,10 @@ impl Axes3dRenderer {
         );
     }
 
-    fn axis_specs(viewport: &PlotViewport3d, style: Axes3dStyle) -> [AxisSpec; 3] {
+    fn axis_specs(
+        viewport: &PlotViewport3d, 
+        style: AxesStyle3d
+    ) -> [AxisSpec; 3] {
         [
             AxisSpec {
                 direction: Vec3::X,
@@ -143,7 +147,7 @@ impl Axes3dRenderer {
         viewport: &PlotViewport3d,
         transform: Transform,
         camera: &Camera,
-        style: Axes3dStyle,
+        style: AxesStyle3d,
         display_aspect: f64,
         braille: &mut BrailleBuffer,
     ) {
@@ -169,7 +173,7 @@ impl Axes3dRenderer {
         viewport: &PlotViewport3d,
         transform: Transform,
         camera: &Camera,
-        style: Axes3dStyle,
+        style: AxesStyle3d,
         buffer: &mut Buffer,
     ) {
         let mut origin_label_drawn = false;
@@ -325,7 +329,7 @@ impl Axes3dRenderer {
                     label_x_center,
                     label_y,
                     &text,
-                    axis.label_style,
+                    axis.label_style.fg,
                 );
 
                 if is_origin {
@@ -431,7 +435,7 @@ impl Axes3dRenderer {
             label_x,
             label_y,
             &axis.label.to_string(),
-            label_cell,
+            label_cell.fg,
         );
     }
 

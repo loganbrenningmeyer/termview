@@ -170,13 +170,45 @@ impl BrailleBuffer {
         }
     }
 
-    pub fn composite(&self, buffer: &mut Buffer) {
+    pub fn composite(&self, buffer: &mut Buffer) -> (Vec<Option<usize>>, Vec<Option<usize>>) {
+        // Track top and bottom border cells (terminal dims), initializing each column to None
+        let mut top: Vec<Option<usize>> = vec![None; self.cell_width];
+        let mut bot: Vec<Option<usize>> = vec![None; self.cell_width];
+
+        // Track top and bottom border dots (braille dims)
+        let mut top_dots: Vec<Option<usize>> = vec![None; self.width()];
+        let mut bot_dots: Vec<Option<usize>> = vec![None; self.width()];
+
         for y in 0..self.cell_height {
             for x in 0..self.cell_width {
                 let cell = self.cells[y * self.cell_width + x];
 
                 if cell.dots == 0 {
                     continue;
+                }
+
+                // Update column's min/max filled CELLS
+                top[x].get_or_insert(y);    // First occupied cell is the top
+                bot[x] = Some(y);           // Latest occupied cell is the bottom
+
+                // Update column's min/max filled DOTS
+                for dot_x in 0..2 {
+                    // Convert from terminal x -> braille dot x
+                    // - Terminal cell x * 2 + dot x offset
+                    let braille_x = x * 2 + dot_x;
+
+                    // Find first occupied dot row in this half of the cell
+                    // - Check four rows for first filled dot
+                    if let Some(dot_y) = (0..4).find(|&dy| cell.dots & DOT_BITS[dy][dot_x] != 0)
+                    {
+                        top_dots[braille_x].get_or_insert(y * 4 + dot_y);
+                    }
+
+                    // Last occupied dot row in this half of the cell
+                    if let Some(dot_y) = (0..4).rev().find(|&dy| cell.dots & DOT_BITS[dy][dot_x] != 0)
+                    {
+                        bot_dots[braille_x] = Some(y * 4 + dot_y);
+                    }
                 }
 
                 // The cell already contains the nearest layer selected by
@@ -192,6 +224,26 @@ impl BrailleBuffer {
                 );
             }
         }
+
+        // Color top/bottom cells
+        let top_color = Color::Rgb(255, 100, 100);
+        let bottom_color = Color::Rgb(100, 150, 255);
+
+        for x in 0..self.cell_width {
+            if let Some(y) = top[x] {
+                let cell = buffer.get(x, y).with_fg(top_color);
+                buffer.set(x as isize, y as isize, cell);
+            }
+
+            if let Some(y) = bot[x] {
+                if Some(y) != top[x] {
+                    let cell = buffer.get(x, y).with_fg(bottom_color);
+                    buffer.set(x as isize, y as isize, cell);
+                }
+            }
+        }
+
+        (top_dots, bot_dots)
     }
 }
 

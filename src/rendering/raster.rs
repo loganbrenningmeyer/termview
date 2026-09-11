@@ -1,4 +1,4 @@
-use super::{Buffer, Cell, Color, PlotArea, PlotViewport};
+use super::{Buffer, Cell, Color, PlotArea2d, PlotViewport2d};
 
 /**
  * Draws rectangular border around buffer edges
@@ -36,7 +36,7 @@ pub fn draw_border(buffer: &mut Buffer, color: Color) {
  */
 fn draw_text_in_area(
     buffer: &mut Buffer,
-    area: PlotArea,
+    area: PlotArea2d,
     x: isize,
     y: isize,
     text: &str,
@@ -66,7 +66,7 @@ pub fn draw_text(
     x: isize,
     y: isize,
     text: &str,
-    cell: Cell,
+    color: Color,
 ) {
     for (offset, ch) in text.chars().enumerate() {
         let Ok(offset) = isize::try_from(offset) else {
@@ -76,10 +76,7 @@ pub fn draw_text(
         buffer.set(
             x + offset,
             y,
-            Cell {
-                ch,
-                fg: cell.fg,
-            },
+            Cell { ch, fg: color },
         );
     }
 }
@@ -89,8 +86,8 @@ pub fn draw_text(
  */
 pub fn draw_axes_ticks(
     buffer: &mut Buffer,
-    viewport: &PlotViewport,
-    area: PlotArea,
+    viewport: &PlotViewport2d,
+    area: PlotArea2d,
     origin_x: isize,
     origin_y: isize,
     tick_x: Cell,
@@ -160,7 +157,7 @@ pub fn draw_axes_ticks(
  */
 pub fn draw_axes_2d(
     buffer: &mut Buffer,
-    area: PlotArea,
+    area: PlotArea2d,
     origin_x: isize,
     origin_y: isize,
     cell_x: Cell,

@@ -34,7 +34,7 @@ impl Default for WireframeStyle {
     }
 }
 
-#[derive(Default)]
+#[derive(Debug, Clone)]
 pub struct WireframeRenderer;
 
 /**

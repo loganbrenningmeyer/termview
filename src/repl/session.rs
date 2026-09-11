@@ -4,17 +4,16 @@ use super::Command;
 use crate::{
     geometry::{Mesh, Object, Point}, 
     math::Transform, 
-    parsing::{
-        Parser,
-        Tokenizer,
-    },
+    parsing::{Parser, Tokenizer},
     rendering::{
         Buffer, 
-        Camera, CameraOrbit, 
-        Projection, OrthographicProjection, 
-        Plot3dRenderer, PlotRenderer, 
-        PlotViewport, PlotViewport3d,
+        Camera, 
+        PlotRenderer2d, 
+        PlotRenderer3d, 
+        PlotViewport2d, 
+        PlotViewport3d,
     },
+    ui::{PlotWidget2d, PlotWidget3d},
 };
 
 
@@ -39,72 +38,148 @@ enum PlotMode {
 pub struct Session {
     active_plot_mode: PlotMode,
 
-    viewport_2d: PlotViewport,
-    renderer_2d: PlotRenderer,
+    viewport_2d: PlotViewport2d,
+    renderer_2d: PlotRenderer2d,
     samples_2d: usize,
 
     viewport_3d: PlotViewport3d,
-    renderer_3d: Plot3dRenderer,
+    renderer_3d: PlotRenderer3d,
     camera_3d: Camera,
     transform_3d: Transform,
     samples_3d: (usize, usize),
 
-    last_plot: Option<LastPlot>,
+    last_plots: HashMap<usize, LastPlot>,
 }
 
 impl Session {
-    pub fn orbit_camera_3d(
-        &mut self,
-        azimuth_delta: f64,
-        elevation_delta: f64,
-    ) {
-        self.camera_3d.orbit.azimuth += azimuth_delta;
-        self.camera_3d.orbit.elevation =
-            (self.camera_3d.orbit.elevation + elevation_delta).clamp(-85.0, 85.0);
-
-        self.camera_3d.update_camera_3d();
+    /**
+     * Render (x, f(x)) points onto buffer using viewport/renderer settings
+     */
+    pub fn render_2d(&self, points: &[Point], buffer: &mut Buffer) {
+        self.renderer_2d.render(
+            points,
+            &self.viewport_2d,
+            buffer,
+        );
     }
 
-    pub fn zoom_camera_3d(
-        &mut self,
-        distance_delta: f64,
-    ) {
-        match &self.camera_3d.projection {
-            Projection::Perspective(p) => {
-                self.camera_3d.orbit.distance = 
-                    (self.camera_3d.orbit.distance + distance_delta).clamp(p.near, f64::MAX);
+    /**
+     * Render (x, y, z) points onto buffer using viewport/renderer settings
+     */
+    pub fn render_3d(&self, surface: &Object, buffer: &mut Buffer) {
+        self.renderer_3d.render(
+            surface, 
+            &self.viewport_3d,
+            &self.camera_3d,
+            buffer,
+        );
+    }
 
-                self.camera_3d.update_camera_3d();
-            }
-            // -------------------------
-            // Orthographic does not change camera distance as
-            // there is no division by distance; near and far are 
-            // the same size
-            // - Instead adjusts the size of the rendering plane
-            // -------------------------
-            Projection::Orthographic(o) => {
-                self.camera_3d.projection = Projection::Orthographic(
-                    OrthographicProjection {
-                        size: o.size + distance_delta / 2.0,    // half because size on both sides
-                        near: o.near,
-                        far: o.far,
-                    }
-                )
-            }
+    /**
+     * Create a PlotWidget2d given the 2D plot Points
+     */
+    pub fn make_widget_2d(&self, points: Vec<Point>) -> PlotWidget2d {
+        PlotWidget2d {
+            points,
+            viewport: self.viewport_2d,
+            renderer: self.renderer_2d.clone(),
         }
     }
 
-    pub fn reset_camera_3d(&mut self) {
-        self.camera_3d.projection = match &self.camera_3d.projection {
-            Projection::Perspective(_) => Projection::Perspective(Default::default()),
-            Projection::Orthographic(_) => Projection::Orthographic(Default::default()),
-        };
-        self.camera_3d.orbit = CameraOrbit::default();
-
-        self.camera_3d.update_camera_3d();
+    /**
+     * Create a PlotWidget3d given the 3D surface
+     */
+    pub fn make_widget_3d(&self, surface: Object) -> PlotWidget3d {
+        PlotWidget3d {
+            surface,
+            camera: self.camera_3d.clone(),
+            viewport: self.viewport_3d,
+            renderer: self.renderer_3d.clone(),
+        }
     }
 
-    pub fn execute(&mut self, command: Command) -> Result<SessionOutput, String> {
+    /**
+     * Parses z = f(x, y) function string and returns (x, y, z)
+     * points sampled over surface
+     */
+    fn sample_surface(
+        &self,
+        expression: &str,
+    ) -> Result<Object, String> {
+        // Tokenize expression
+        let mut tokenizer = Tokenizer::new(expression);
+        let tokens = tokenizer.tokenize()?;
+
+        // Parse tokens into abstract syntax tree
+        let mut parser = Parser::new(tokens);
+        let tree = parser.parse_expression(0)?;
+
+        // Compute (x, f(x)) over x-samples in viewport range
+        let mut vars = HashMap::from([
+            ("x".to_string(), 0.0),
+            ("y".to_string(), 0.0),
+        ]);
+
+        // Define Fn(f64, f64) -> f64 for Mesh::surface()
+        let function = |x: f64, y: f64| {
+            *vars.get_mut("x").unwrap() = x;
+            *vars.get_mut("y").unwrap() = y;
+            tree.evaluate(&vars)
+        };
+
+        let viewport = &self.viewport_3d;
+        let (x_samples, y_samples) = self.samples_3d;
+
+        let mesh = Mesh::surface(
+            viewport.x_min,
+            viewport.x_max,
+            viewport.y_min,
+            viewport.y_max,
+            x_samples,
+            y_samples,
+            function,
+        );
+
+        Ok(Object::new(mesh, self.transform_3d))
+    }
+
+    /**
+     * Parses f(x) expression string and returns (x, f(x))
+     * points sampled over viewport range
+     */
+    fn sample_expression(&self, expression: &str) -> Result<Vec<Point>, String> {
+        // Tokenize expression
+        let mut tokenizer = Tokenizer::new(expression);
+        let tokens = tokenizer.tokenize()?;
+
+        // Parse tokens into abstract syntax tree
+        let mut parser = Parser::new(tokens);
+        let tree = parser.parse_expression(0)?;
+
+        // Compute (x, f(x)) over x-samples in viewport range
+        let mut vars = HashMap::from([("x".to_string(), 0.0)]);
+
+        let points = (0..self.samples_2d)
+            .filter_map(|i| {
+                let t = i as f64 / (self.samples_2d - 1) as f64;
+                let x = self.viewport_2d.x_min
+                    + t * (self.viewport_2d.x_max - self.viewport_2d.x_min);
+                
+                *vars.get_mut("x").unwrap() = x;
+                let y = tree.evaluate(&vars);
+
+                y.is_finite().then_some(Point::new(x, y))
+            })
+            .collect();
+
+        Ok(points)
+    }
+
+    pub fn execute(
+        &mut self, 
+        pane_id: usize,
+        command: Command
+    ) -> Result<SessionOutput, String> {
         match command {
             Command::Plot(expression) => {
                 match self.active_plot_mode {
@@ -114,7 +189,10 @@ impl Session {
                             Err(error) => return Ok(SessionOutput::Message(error)),
                         };
 
-                        self.last_plot = Some(LastPlot::Plot2d(expression));
+                        self.last_plots.insert(
+                            pane_id,
+                            LastPlot::Plot2d(expression),
+                        );
                         Ok(SessionOutput::Plot2d(points))
                     }
                     PlotMode::ThreeD => {
@@ -123,7 +201,10 @@ impl Session {
                             Err(error) => return Ok(SessionOutput::Message(error)),
                         };
 
-                        self.last_plot = Some(LastPlot::Plot3d(expression));
+                        self.last_plots.insert(
+                            pane_id,
+                            LastPlot::Plot3d(expression),
+                        );
                         Ok(SessionOutput::Plot3d(surface))
                     }
                 }
@@ -132,13 +213,16 @@ impl Session {
             Command::Plot3d(expression) => {
                 self.active_plot_mode = PlotMode::ThreeD;
                 let surface = self.sample_surface(&expression)?;
-                self.last_plot = Some(LastPlot::Plot3d(expression));
+                self.last_plots.insert(
+                    pane_id,
+                    LastPlot::Plot3d(expression),
+                );
 
                 Ok(SessionOutput::Plot3d(surface))
             }
 
             Command::Replot => {
-                match &self.last_plot {
+                match &self.last_plots.get(&pane_id) {
                     Some(LastPlot::Plot2d(expression)) => {
                         let points = self.sample_expression(&expression)?;
                         Ok(SessionOutput::Plot2d(points))
@@ -150,7 +234,7 @@ impl Session {
                     }
 
                     _ => Ok(SessionOutput::Message(
-                        "No previous plot".into()
+                        "This pane has no previous plot".into()
                     ))
                 }
             }
@@ -186,7 +270,7 @@ impl Session {
                             return Ok(SessionOutput::Message("2D view expects x and y bounds only".into()));
                         }
 
-                        self.viewport_2d = PlotViewport {
+                        self.viewport_2d = PlotViewport2d {
                             x_min,
                             x_max,
                             y_min,
@@ -280,115 +364,16 @@ impl Session {
     }
 
     /**
-     * Render (x, f(x)) points onto buffer using viewport/renderer settings
+     * Forget pane's plot history upon removal
      */
-    pub fn render_2d(&self, points: &[Point], buffer: &mut Buffer) {
-        self.renderer_2d.render(
-            points,
-            &self.viewport_2d,
-            buffer,
-        );
-    }
-
-    /**
-     * Render (x, y, z) points onto buffer using viewport/renderer settings
-     */
-    pub fn render_3d(&self, surface: &Object, buffer: &mut Buffer) {
-        self.renderer_3d.render(
-            surface, 
-            &self.viewport_3d,
-            &self.camera_3d,
-            buffer,
-        );
-    }
-
-    /**
-     * Parses z = f(x, y) function string and returns (x, y, z)
-     * points sampled over surface
-     */
-    fn sample_surface(
-        &self,
-        expression: &str,
-    ) -> Result<Object, String> {
-        // Tokenize expression
-        let mut tokenizer = Tokenizer::new(expression);
-        let tokens = tokenizer.tokenize()?;
-
-        // Parse tokens into abstract syntax tree
-        let mut parser = Parser::new(tokens);
-        let tree = parser.parse_expression(0)?;
-
-        // Compute (x, f(x)) over x-samples in viewport range
-        let mut vars = HashMap::from([
-            ("x".to_string(), 0.0),
-            ("y".to_string(), 0.0),
-        ]);
-
-        // Define Fn(f64, f64) -> f64 for Mesh::surface()
-        let function = |x: f64, y: f64| {
-            *vars.get_mut("x").unwrap() = x;
-            *vars.get_mut("y").unwrap() = y;
-            tree.evaluate(&vars)
-        };
-
-        let viewport = &self.viewport_3d;
-        let (x_samples, y_samples) = self.samples_3d;
-
-        let mesh = Mesh::surface(
-            viewport.x_min,
-            viewport.x_max,
-            viewport.y_min,
-            viewport.y_max,
-            x_samples,
-            y_samples,
-            function,
-        );
-
-        Ok(Object::new(mesh, self.transform_3d))
-    }
-
-    /**
-     * Parses f(x) expression string and returns (x, f(x))
-     * points sampled over viewport range
-     */
-    fn sample_expression(&self, expression: &str) -> Result<Vec<Point>, String> {
-        // Tokenize expression
-        let mut tokenizer = Tokenizer::new(expression);
-        let tokens = tokenizer.tokenize()?;
-
-        // Parse tokens into abstract syntax tree
-        let mut parser = Parser::new(tokens);
-        let tree = parser.parse_expression(0)?;
-
-        // Compute (x, f(x)) over x-samples in viewport range
-        let mut vars = HashMap::from([("x".to_string(), 0.0)]);
-
-        let points = (0..self.samples_2d)
-            .filter_map(|i| {
-                let t = i as f64 / (self.samples_2d - 1) as f64;
-                let x = self.viewport_2d.x_min
-                    + t * (self.viewport_2d.x_max - self.viewport_2d.x_min);
-                
-                *vars.get_mut("x").unwrap() = x;
-                let y = tree.evaluate(&vars);
-
-                y.is_finite().then_some(Point::new(x, y))
-            })
-            .collect();
-
-        Ok(points)
+    pub fn forget_pane(&mut self, pane_id: usize) {
+        self.last_plots.remove(&pane_id);
     }
 
     /**
      * Print current PlotViewport / PlotRenderer configuration
      */
     fn config_text(&self) -> String {
-        let last_plot = match &self.last_plot {
-            Some(LastPlot::Plot2d(expression)) => format!("2D: {expression}"),
-            Some(LastPlot::Plot3d(expression)) => format!("3D: {expression}"),
-            None => "<none>".to_string(),
-        };
-
         let active_settings = match self.active_plot_mode {
             PlotMode::TwoD => format!(
             r#"
@@ -400,7 +385,6 @@ Current settings
   Axes               {}
   Ticks              {}
   Border             {}
-  Last plot          {}
 "#,
             self.viewport_2d.x_min,
             self.viewport_2d.y_min,
@@ -411,7 +395,6 @@ Current settings
             on_off(self.renderer_2d.show_axes),
             on_off(self.renderer_2d.show_ticks),
             on_off(self.renderer_2d.show_border),
-            last_plot,
             ),
             PlotMode::ThreeD => format!(
             r#"
@@ -423,7 +406,6 @@ Current settings
   Axes               {}
   Ticks              {}
   Border             {}
-  Last plot          {}
 "#,
                 self.viewport_3d.x_min,
                 self.viewport_3d.y_min,
@@ -437,7 +419,6 @@ Current settings
                 on_off(self.renderer_3d.show_axes),
                 on_off(self.renderer_3d.axes_renderer.show_ticks),
                 on_off(self.renderer_3d.show_border),
-                last_plot,
             ),
         };
 
@@ -506,18 +487,18 @@ impl Default for Session {
             active_plot_mode: PlotMode::TwoD,
 
             // 2D
-            viewport_2d: PlotViewport::default(),
-            renderer_2d: PlotRenderer::default(),
+            viewport_2d: PlotViewport2d::default(),
+            renderer_2d: PlotRenderer2d::default(),
             samples_2d: 500,
             
             // 3D
             viewport_3d: PlotViewport3d::default(),
-            renderer_3d: Plot3dRenderer::default(),
+            renderer_3d: PlotRenderer3d::default(),
             camera_3d: Camera::default(),
             transform_3d: Transform::default(),
             samples_3d: (10, 10),
 
-            last_plot: None,
+            last_plots: HashMap::new(),
         }
     }
 }

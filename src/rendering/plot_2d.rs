@@ -3,7 +3,7 @@ use super::{draw_axes_2d, draw_axes_ticks, draw_border};
 use crate::geometry::Point;
 
 #[derive(Debug, Clone, Copy)]
-pub struct PlotStyle {
+pub struct PlotStyle2d {
     pub point: Cell,
     pub line: Cell,
     pub x_axis: Cell,
@@ -14,7 +14,7 @@ pub struct PlotStyle {
     pub border_color: Color,
 }
 
-impl PlotStyle {
+impl PlotStyle2d {
     pub const fn curve_color(mut self, color: Color) -> Self {
         self.point = self.point.with_fg(color);
         self.line = self.line.with_fg(color);
@@ -40,7 +40,7 @@ impl PlotStyle {
     }
 }
 
-impl Default for PlotStyle {
+impl Default for PlotStyle2d {
     fn default() -> Self {
         let axis_color = Color::Rgb(120, 120, 120);
 
@@ -57,9 +57,10 @@ impl Default for PlotStyle {
     }
 }
 
-pub struct PlotRenderer {
-    pub style: PlotStyle,
-    pub aspect: PlotAspect,
+#[derive(Debug, Clone)]
+pub struct PlotRenderer2d {
+    pub style: PlotStyle2d,
+    pub aspect: PlotAspect2d,
     pub pad_width: usize,
     pub pad_height: usize,
     pub show_axes: bool,
@@ -69,20 +70,20 @@ pub struct PlotRenderer {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum PlotAspect {
+pub enum PlotAspect2d {
     Auto,
     Equal { cell_aspect: f64 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PlotArea {
+pub struct PlotArea2d {
     pub left: isize,
     pub right: isize,
     pub top: isize,
     pub bottom: isize,
 }
 
-impl PlotArea {
+impl PlotArea2d {
     pub const fn width(self) -> isize {
         self.right - self.left
     }
@@ -93,7 +94,7 @@ impl PlotArea {
 
     pub fn fit_equal_aspect(
         self,
-        viewport: &PlotViewport,
+        viewport: &PlotViewport2d,
         cell_aspect: f64,
     ) -> Self {
         let x_range = viewport.x_max - viewport.x_min;
@@ -110,7 +111,7 @@ impl PlotArea {
 
             let offset = (self.width() - new_width) / 2;
 
-            PlotArea {
+            PlotArea2d {
                 left: self.left + offset,
                 right: self.left + offset + new_width,
                 ..self
@@ -122,7 +123,7 @@ impl PlotArea {
 
             let offset = (self.height() - new_height) / 2;
 
-            PlotArea {
+            PlotArea2d {
                 top: self.top + offset,
                 bottom: self.top + offset + new_height,
                 ..self
@@ -131,14 +132,15 @@ impl PlotArea {
     }
 }
 
-pub struct PlotViewport {
+#[derive(Debug, Clone, Copy)]
+pub struct PlotViewport2d {
     pub x_min: f64,
     pub x_max: f64,
     pub y_min: f64,
     pub y_max: f64,
 }
 
-impl Default for PlotViewport {
+impl Default for PlotViewport2d {
     fn default() -> Self {
         Self {
             x_min: -10.0,
@@ -150,17 +152,22 @@ impl Default for PlotViewport {
 }
 
 
-impl PlotRenderer {
+impl PlotRenderer2d {
     /**
      * Project / render 2D points into buffer, fitting
      * into viewport dimensions
      */
-    pub fn render(&self, points: &[Point], viewport: &PlotViewport, buffer: &mut Buffer) {
+    pub fn render(
+        &self, 
+        points: &[Point], 
+        viewport: &PlotViewport2d, 
+        buffer: &mut Buffer
+    ) {
         let Some(mut area) = self.plot_area(buffer) else {
             return;
         };
 
-        if let PlotAspect::Equal { cell_aspect } = self.aspect {
+        if let PlotAspect2d::Equal { cell_aspect } = self.aspect {
             area = area.fit_equal_aspect(viewport, cell_aspect);
         }
 
@@ -226,13 +233,13 @@ impl PlotRenderer {
         }
     }
 
-    fn plot_area(&self, buffer: &Buffer) -> Option<PlotArea> {
+    fn plot_area(&self, buffer: &Buffer) -> Option<PlotArea2d> {
         let width = isize::try_from(buffer.width()).ok()?;
         let height = isize::try_from(buffer.height()).ok()?;
         let pad_width = isize::try_from(self.pad_width).ok()?;
         let pad_height = isize::try_from(self.pad_height).ok()?;
 
-        let area = PlotArea {
+        let area = PlotArea2d {
             left: pad_width,
             right: width.checked_sub(pad_width + 1)?,
             top: pad_height,
@@ -248,8 +255,8 @@ impl PlotRenderer {
     fn project(
         &self,
         point: Point,
-        viewport: &PlotViewport,
-        area: PlotArea,
+        viewport: &PlotViewport2d,
+        area: PlotArea2d,
     ) -> Option<(isize, isize)> {
         let x_range = viewport.x_max - viewport.x_min;
         let y_range = viewport.y_max - viewport.y_min;
@@ -272,8 +279,8 @@ impl PlotRenderer {
     fn project_braille(
         &self,
         point: Point,
-        viewport: &PlotViewport,
-        area: PlotArea,
+        viewport: &PlotViewport2d,
+        area: PlotArea2d,
     ) -> Option<(isize, isize)> {
         let x_range = viewport.x_max - viewport.x_min;
         let y_range = viewport.y_max - viewport.y_min;
@@ -297,17 +304,17 @@ impl PlotRenderer {
     }
 }
 
-impl Default for PlotRenderer {
+impl Default for PlotRenderer2d {
     fn default() -> Self {
         Self {
-            style: PlotStyle::default(),
-            aspect: PlotAspect::Auto,
+            style: PlotStyle2d::default(),
+            aspect: PlotAspect2d::Auto,
             pad_width: 5,
             pad_height: 2,
             show_axes: true,
             show_ticks: true,
             num_ticks: 10,
-            show_border: false,
+            show_border: true,
         }
     }
 }
