@@ -1,24 +1,14 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::{
-    geometry::{Object, Point},
-    math::{Projection, OrthographicProjection},
-    rendering::{
-        Buffer,
-        Camera,
-        CameraOrbit,
-        Cell,
-        PlotViewport2d,
-        PlotViewport3d,
-        PlotRenderer2d,
-        PlotRenderer3d,
-    }
+    geometry::{
+        Object, Point, sample_curve_at, sample_surface_at,
+    }, math::{OrthographicProjection, Projection}, parsing::TokenNode, rendering::{
+        Buffer, Camera, CameraOrbit, Cell, PlotRenderer2d, PlotRenderer3d, PlotViewport2d, PlotViewport3d,
+    },
 };
 
 
-/**
- * 
- */
 #[derive(Debug, PartialEq)]
 pub enum KeyResult {
     Ignored,
@@ -26,16 +16,36 @@ pub enum KeyResult {
     Exit,
 }
 
+
+/**
+ * Animation state for expressions using t
+ * which changes over time
+ */
+pub struct Animation {
+    pub expression: TokenNode,
+    pub time: f64,      // value passed as t
+    pub speed: f64,     // speed of animation (scales delta_t)
+    pub phase: f64,     // position along the full round trip
+    pub period: f64,    // time for one way of the trip
+    pub playing: bool,  
+}
+
+
 pub trait Widget {
     fn render(&self, target: &mut Buffer);
     fn handle_key(&mut self, key: KeyEvent) -> KeyResult;
+    fn update(&mut self, _delta_s: f64) -> bool {
+        false
+    }
 }
+
 
 pub struct PlotWidget3d {
     pub surface: Object,
     pub camera: Camera,
     pub viewport: PlotViewport3d,
     pub renderer: PlotRenderer3d,
+    pub animation: Option<Animation>,
 }
 
 impl PlotWidget3d {
@@ -44,8 +54,9 @@ impl PlotWidget3d {
         camera: Camera,
         viewport: PlotViewport3d,
         renderer: PlotRenderer3d,
+        animation: Option<Animation>,
     ) -> Self {
-        Self { surface, camera, viewport, renderer }
+        Self { surface, camera, viewport, renderer, animation }
     }
 
     pub fn orbit_camera(
@@ -97,6 +108,18 @@ impl PlotWidget3d {
         self.camera.orbit = CameraOrbit::default();
 
         self.camera.update();
+    }
+
+    pub fn resample(&mut self) {
+        let Some(animation) = &self.animation else {
+            return;
+        };
+
+        sample_surface_at(
+            &animation.expression,
+            animation.time,
+            &mut self.surface.mesh,
+        );
     }
 }
 
@@ -162,21 +185,60 @@ impl Widget for PlotWidget3d {
             _ => KeyResult::Ignored,
         }
     }
+
+    /**
+     * If animation is enabled, update animation state
+     * given the elapsed time
+     * - Updates the PlotWidget3d's surface Mesh in place at each vertex
+     * 
+     * - Returns true to request a redraw, false if not animating
+     */
+    fn update(&mut self, delta_s: f64) -> bool {
+        // No redraw if static or paused
+        let Some(animation) = &mut self.animation else {
+            return false;
+        };
+
+        if !animation.playing || animation.speed == 0.0 {
+            return false;
+        }
+
+        // Advance (t) by animation speed & elapsed time
+        let limit = animation.period;
+
+        animation.phase = (
+            animation.phase + delta_s * animation.speed
+        ).rem_euclid(2.0 * limit);
+
+        animation.time = if animation.phase <= limit {
+            animation.phase
+        } else {
+            2.0 * limit - animation.phase
+        };
+
+        self.resample();
+
+        true
+    }
 }
 
 pub struct PlotWidget2d {
     pub points: Vec<Point>,
+    pub samples: usize,
     pub viewport: PlotViewport2d,
     pub renderer: PlotRenderer2d,
+    pub animation: Option<Animation>,
 }
 
 impl PlotWidget2d {
     pub fn new(
         points: Vec<Point>,
+        samples: usize,
         viewport: PlotViewport2d,
         renderer: PlotRenderer2d,
+        animation: Option<Animation>,
     ) -> Self {
-        Self { points, viewport, renderer }
+        Self { points, samples, viewport, renderer, animation }
     }
 
     /**
@@ -211,6 +273,21 @@ impl PlotWidget2d {
         self.viewport.x_max += x_pan;
         self.viewport.y_min += y_pan;
         self.viewport.y_max += y_pan;
+    }
+
+    pub fn resample(&mut self) {
+        let Some(animation) = &self.animation else {
+            return;
+        };
+
+        sample_curve_at(
+            &animation.expression,
+            self.viewport.x_min,
+            self.viewport.x_max,
+            self.samples,
+            animation.time,
+            &mut self.points,
+        );
     }
 }
 
@@ -268,6 +345,41 @@ impl Widget for PlotWidget2d {
 
             _ => KeyResult::Ignored,
         }
+    }
+
+    /**
+     * If animation is enabled, update animation state
+     * given the elapsed time
+     * - Updates the PlotWidget2d's Points array in place
+     * 
+     * - Returns true to request a redraw, false if not animating
+     */
+    fn update(&mut self, delta_s: f64) -> bool {
+        // No redraw if static or paused
+        let Some(animation) = &mut self.animation else {
+            return false;
+        };
+
+        if !animation.playing || animation.speed == 0.0 {
+            return false;
+        }
+
+        // Advance (t) by animation speed & elapsed time
+        let limit = animation.period;
+
+        animation.phase = (
+            animation.phase + delta_s * animation.speed
+        ).rem_euclid(2.0 * limit);
+
+        animation.time = if animation.phase <= limit {
+            animation.phase
+        } else {
+            2.0 * limit - animation.phase
+        };
+
+        self.resample();
+
+        true
     }
 }
 

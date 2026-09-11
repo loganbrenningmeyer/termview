@@ -277,6 +277,14 @@ impl WireframeRenderer {
             return None;
         }
 
+        // Ignore non-finite points
+        if !point.x.is_finite()
+            || !point.y.is_finite()
+            || !point.z.is_finite()
+        {
+            return None;
+        }
+        
         // Transform object-space → clip-space
         let clip = *mvp * Vec4 {
             x: point.x,

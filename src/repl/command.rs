@@ -15,12 +15,22 @@ pub enum Command {
     },
     SetProjection(Projection),
     SetSamples(usize),
+
     ShowAxes(bool),
     ShowTicks(bool),
     ShowBorder(bool),
+
     Plot(String),
     Plot3d(String),
     Replot,
+
+    Animate(String),
+    Animate3d(String),
+    Pause,
+    Resume,
+    SetSpeed(f64),
+    SetTime(f64),
+    
     Config,
     Help,
     Quit,
@@ -75,6 +85,15 @@ impl Command {
             ["show", args @ ..]   => Self::parse_show(args),
             ["plot", args @ ..]   => Self::parse_plot(args),
             ["plot3d", args @ ..] => Self::parse_plot3d(args),
+
+            ["animate", args @ ..]   => Self::parse_animate(args),
+            ["animate3d", args @ ..] => Self::parse_animate3d(args),
+
+            ["pause"]  => Ok(Command::Pause),
+            ["resume"] => Ok(Command::Resume),
+
+            ["speed", val] | ["set", "speed", val] => Self::parse_set_speed(val),
+            ["time", val] | ["set", "time", val]   => Self::parse_set_time(val),
             
             [] => Err("Empty command".into()),
             _ => Err(format!("Unknown command: {line}")),
@@ -95,12 +114,43 @@ impl Command {
     // -------------------------
     fn parse_plot3d(args: &[&str]) -> Result<Command, String> {
         let function_str = args.join("");
-
-        if function_str.is_empty() {
-            return Err("plot3d requires an expression".into());
-        }
-
         Ok(Command::Plot3d(function_str))
+    }
+
+    // -------------------------
+    // termview> animate <function>
+    // -------------------------
+    fn parse_animate(args: &[&str]) -> Result<Command, String> {
+        // Remove whitespace / combine into String
+        let function_str = args.join("");
+        Ok(Command::Animate(function_str))
+    }
+
+    // -------------------------
+    // termview> animate3d <function>
+    // -------------------------
+    fn parse_animate3d(args: &[&str]) -> Result<Command, String> {
+        // Remove whitespace / combine into String
+        let function_str = args.join("");
+        Ok(Command::Animate3d(function_str))
+    }
+
+    // -------------------------
+    // termview> set speed <val>
+    // -------------------------
+    fn parse_set_speed(val: &str) -> Result<Command, String> {
+        let speed = val.parse::<f64>()
+                             .map_err(|_| format!("Invalid animation speed: {val}"))?;
+        Ok(Command::SetSpeed(speed))
+    }
+
+    // -------------------------
+    // termview> set time <val>
+    // -------------------------
+    fn parse_set_time(val: &str) -> Result<Command, String> {
+        let time = val.parse::<f64>()
+                             .map_err(|_| format!("Invalid animation time (t): {val}"))?;
+        Ok(Command::SetTime(time))
     }
 
     // -------------------------

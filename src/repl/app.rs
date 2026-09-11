@@ -1,4 +1,5 @@
 use std::{collections::HashMap, io::{self, Write}};
+use std::time::{Duration, Instant};
 use crossterm::{
     event::{self, Event, KeyCode, KeyEvent, KeyEventKind}, 
     terminal::{disable_raw_mode, enable_raw_mode},
@@ -15,6 +16,7 @@ use crate::{
         Pane,
         PaneContent,
         Rect,
+        Widget,
     },
     terminal::{self as term, TerminalPresenter},
 };
@@ -141,18 +143,58 @@ impl TermviewApp {
             return Ok(CommandEffect::Quit);
         }
 
-        // Set Pane title to expression for plots
-        let expression = match &command {
-            Command::Plot(expr) | Command::Plot3d(expr) => {
-                Some(expr.clone())
+        // -------------------------
+        // Animation Pause / Resume / Speed & Time
+        // -------------------------
+        if matches!(
+            &command,
+            Command::Pause | Command::Resume |
+            Command::SetSpeed(_) | Command::SetTime(_)
+        ) {
+            let pane = self.get_active_pane()?;
+            let content = &mut pane.widget;
+
+            let animation = content
+                .animation_mut()
+                .ok_or("The active pane has no animation")?;
+        
+            match &command {
+                Command::Pause => animation.playing = false,
+                Command::Resume => animation.playing = true,
+                
+                Command::SetSpeed(speed) => {
+                    if !speed.is_finite() {
+                        return Err("Animation speed must be finite".into());
+                    }
+                    
+                    animation.speed = *speed;
+                }
+                
+                Command::SetTime(time) => {
+                    if !time.is_finite() {
+                        return Err("Animation time must be finite".into())
+                    }
+                    animation.time = *time;
+                    animation.phase = *time;
+                    
+                    // Time elapsed, resample animation
+                    if matches!(&command, Command::SetTime(_)) {
+                        content.resample();
+                    }
+                }
+
+                _ => unreachable!(),
             }
-            _ => None,
-        };
+
+            return Ok(CommandEffect::Redraw);   // redraw after animation updates
+        }
+
+        let result = self.session.execute(self.active_pane, command)?;
 
         // -------------------------
         // Execute parsed Command with Session
         // -------------------------
-        match self.session.execute(self.active_pane, command)? {
+        match result {
             SessionOutput::None => Ok(CommandEffect::None),
 
             SessionOutput::Message(msg) => {
@@ -160,27 +202,11 @@ impl TermviewApp {
                 Ok(CommandEffect::None)
             }
 
-            SessionOutput::Plot2d(points) => {
-                let widget = self.session.make_widget_2d(points);
+            SessionOutput::Plot { title, content } => {
                 let pane = self.get_active_pane()?;
 
-                if let Some(expr) = expression {
-                    pane.set_title(format!(" y = {expr} "));
-                }
-                pane.set_widget(PaneContent::Plot2d(widget));
-                pane.mode = InteractionMode::Interactive;
-
-                Ok(CommandEffect::Redraw)
-            }
-
-            SessionOutput::Plot3d(surface) => {
-                let widget = self.session.make_widget_3d(surface);
-                let pane = self.get_active_pane()?;
-
-                if let Some(expr) = expression {
-                    pane.set_title(format!(" z = {expr} "));
-                }
-                pane.set_widget(PaneContent::Plot3d(widget));
+                pane.set_title(title);
+                pane.set_widget(content);
                 pane.mode = InteractionMode::Interactive;
 
                 Ok(CommandEffect::Redraw)
@@ -275,14 +301,54 @@ impl TermviewApp {
         Ok(control)
     }
     
+    /**
+     * 
+     */
     fn run_view(
         &mut self, 
         output: &mut impl Write
     ) -> io::Result<AppControl> {
         self.present(output)?;
+
+        // Init animation params
+        let frame_interval = Duration::from_millis(16);
+        let mut last_update = Instant::now();
         
         // Loop for keyboard inputs for interactive view modes
         loop {
+            // Update animations when the next frame is due
+            // after frame_interval time has elapsed
+            let now = Instant::now();
+            let elapsed = now.duration_since(last_update);
+
+            if elapsed >= frame_interval {
+                let delta_s = elapsed.as_secs_f64();
+                last_update = now;
+
+                // If any pane is updated, re-present the output
+                // - widget.update() returns true when needing a redraw
+                let mut changed = false;
+
+                for pane in self.panes.values_mut() {
+                    if pane.widget.update(delta_s) {
+                        changed = true;
+                    }
+                }
+
+                if changed {
+                    self.present(output)?;
+                }
+            }
+
+            // Wait until the next frame for processing input
+            // - event::poll(timeout) waits up to `timeout` duration for an event
+            let timeout = frame_interval.saturating_sub(last_update.elapsed());
+
+            if !event::poll(timeout)? {
+                continue;
+            }
+
+            // Handle key inputs
             match event::read()? {
                 // Key-input terminal resize
                 Event::Resize(width, height) => {

@@ -97,4 +97,47 @@ impl TokenNode {
             }
         }
     }
+
+    /**
+     * Validates that the variable IdentifierNodes are fit
+     * for plotting (x for 2D, x & y for 3D, and t if animated)
+     */
+    pub fn validate_variables(&self, dim: usize, animated: bool) -> Result<(), String> {
+        match self {
+            TokenNode::NumberNode(_) => Ok(()),
+
+            TokenNode::IdentifierNode(name) => {
+                let valid = match dim {
+                    2 => name == "x" || (animated && name == "t"),
+                    3 => name == "x" || name == "y" || (animated && name == "t"),
+                    _ => {
+                        return Err(format!(
+                            "Invalid dim, expected 2 or 3 but got '{}'",
+                            dim
+                        ));
+                    }
+                };
+
+                if valid {
+                    Ok(())
+                } else {
+                    Err(format!("Unknown variable '{}'", name))
+                }
+            }
+
+            TokenNode::UnaryNode(_, child) => {
+                child.validate_variables(dim, animated)
+            }
+
+            TokenNode::BinaryNode(_, left, right) => {
+                left.validate_variables(dim, animated)?;
+                right.validate_variables(dim, animated)?;
+                Ok(())
+            }
+
+            TokenNode::CallNode(_, child) => {
+                child.validate_variables(dim, animated)
+            }
+        }
+    }
 }

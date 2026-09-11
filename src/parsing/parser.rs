@@ -103,6 +103,8 @@ impl Parser {
                         .ok_or_else(|| format!("Unknown function: '{name}'"))?;
 
                     Ok(TokenNode::CallNode(function, Box::new(arg)))
+
+                // Variable, e.g., x, y, z, t
                 } else {
                     Ok(TokenNode::IdentifierNode(name))
                 }

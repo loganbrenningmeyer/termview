@@ -1,6 +1,7 @@
 use crossterm::event::{KeyEvent};
 
 use super::{
+    Animation,
     KeyResult, 
     PlotWidget2d, 
     PlotWidget3d,
@@ -126,6 +127,32 @@ pub enum PaneContent {
     Empty,
 }
 
+impl PaneContent {
+    /**
+     * Give a mutable reference to the Animation stored
+     * inside the Widget, None if empty pane or static plot
+     */
+    pub fn animation_mut(&mut self) -> Option<&mut Animation> {
+        match self {
+            Self::Plot2d(widget) => widget.animation.as_mut(),
+            Self::Plot3d(widget) => widget.animation.as_mut(),
+            Self::Empty => None,
+        }
+    }
+
+    /**
+     * Sample new values for the current Animation state
+     * if Animation is enabled
+     */
+    pub fn resample(&mut self) {
+        match self {
+            Self::Plot2d(widget) => widget.resample(),
+            Self::Plot3d(widget) => widget.resample(),
+            Self::Empty => {}
+        }
+    }
+}
+
 impl Widget for PaneContent {
     fn render(&self, target: &mut Buffer) {
         match self {
@@ -140,6 +167,14 @@ impl Widget for PaneContent {
             Self::Plot2d(widget) => widget.handle_key(key),
             Self::Plot3d(widget) => widget.handle_key(key),
             Self::Empty => KeyResult::Ignored,
+        }
+    }
+
+    fn update(&mut self, delta_s: f64) -> bool {
+        match self {
+            Self::Plot2d(widget) => widget.update(delta_s),
+            Self::Plot3d(widget) => widget.update(delta_s),
+            Self::Empty => false
         }
     }
 }

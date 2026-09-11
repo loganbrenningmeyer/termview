@@ -2,9 +2,9 @@ use std::collections::HashMap;
 
 use super::Command;
 use crate::{
-    geometry::{Mesh, Object, Point}, 
+    geometry::{Mesh, Object, Point, sample_curve_at, sample_surface_at}, 
     math::Transform, 
-    parsing::{Parser, Tokenizer},
+    parsing::{Parser, Tokenizer}, 
     rendering::{
         Buffer, 
         Camera, 
@@ -12,21 +12,25 @@ use crate::{
         PlotRenderer3d, 
         PlotViewport2d, 
         PlotViewport3d,
-    },
-    ui::{PlotWidget2d, PlotWidget3d},
+    }, 
+    ui::{Animation, PaneContent, PlotWidget2d, PlotWidget3d},
 };
 
 
 pub enum SessionOutput {
     None,
-    Plot2d(Vec<Point>),
-    Plot3d(Object),
     Message(String),
+    Plot {
+        title: String,
+        content: PaneContent,
+    },
 }
 
-enum LastPlot {
-    Plot2d(String),
-    Plot3d(String),
+#[derive(Debug, Clone)]
+struct LastPlot {
+    expression: String,
+    mode: PlotMode,
+    animated: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,104 +79,161 @@ impl Session {
         );
     }
 
-    /**
-     * Create a PlotWidget2d given the 2D plot Points
-     */
-    pub fn make_widget_2d(&self, points: Vec<Point>) -> PlotWidget2d {
-        PlotWidget2d {
-            points,
-            viewport: self.viewport_2d,
-            renderer: self.renderer_2d.clone(),
-        }
+    fn plot_for_pane(
+        &mut self,
+        pane_id: usize,
+        expression: String,
+        mode: PlotMode,
+        animated: bool,
+    ) -> Result<SessionOutput, String> {
+        let output = match mode {
+            PlotMode::TwoD => {
+                self.build_plot_2d(expression.clone(), animated)?
+            }
+            PlotMode::ThreeD => {
+                self.build_plot_3d(expression.clone(), animated)?
+            }
+        };
+
+        // Replace history after successfully building the plot
+        self.last_plots.insert(
+            pane_id,
+            LastPlot {
+                expression,
+                mode,
+                animated,
+            }
+        );
+
+        Ok(output)
     }
 
     /**
-     * Create a PlotWidget3d given the 3D surface
+     * Tokenizes & parses expression, validates its variable
+     * identifier nodes (x, t if animated), and computes y = f(x) samples to
+     * build a Widget for PaneContent
      */
-    pub fn make_widget_3d(&self, surface: Object) -> PlotWidget3d {
-        PlotWidget3d {
-            surface,
-            camera: self.camera_3d.clone(),
-            viewport: self.viewport_3d,
-            renderer: self.renderer_3d.clone(),
-        }
-    }
-
-    /**
-     * Parses z = f(x, y) function string and returns (x, y, z)
-     * points sampled over surface
-     */
-    fn sample_surface(
+    fn build_plot_2d(
         &self,
-        expression: &str,
-    ) -> Result<Object, String> {
-        // Tokenize expression
-        let mut tokenizer = Tokenizer::new(expression);
+        expression: String,
+        animated: bool,
+    ) -> Result<SessionOutput, String> {
+        // Tokenize / parse expression into AST 
+        let mut tokenizer = Tokenizer::new(&expression);
         let tokens = tokenizer.tokenize()?;
 
-        // Parse tokens into abstract syntax tree
         let mut parser = Parser::new(tokens);
         let tree = parser.parse_expression(0)?;
 
-        // Compute (x, f(x)) over x-samples in viewport range
-        let mut vars = HashMap::from([
-            ("x".to_string(), 0.0),
-            ("y".to_string(), 0.0),
-        ]);
+        // Validate variable identifiers
+        tree.validate_variables(2, animated)?;
 
-        // Define Fn(f64, f64) -> f64 for Mesh::surface()
-        let function = |x: f64, y: f64| {
-            *vars.get_mut("x").unwrap() = x;
-            *vars.get_mut("y").unwrap() = y;
-            tree.evaluate(&vars)
+        // Perform initial sample with t = 0
+        // - No effect if not animated
+        let mut points = Vec::with_capacity(self.samples_2d);
+
+        sample_curve_at(
+            &tree,
+            self.viewport_2d.x_min,
+            self.viewport_2d.x_max,
+            self.samples_2d,
+            0.0,
+            &mut points,
+        ); 
+
+        // Define animation parameters if enabled
+        let animation = if animated {
+            Some(Animation {
+                expression: tree,
+                time: 0.0,
+                speed: 1.0,
+                period: 5.0,
+                phase: 0.0,
+                playing: true,
+            }) 
+        } else {
+            None
         };
 
+        // Create Widget for PaneContent
+        let widget = PlotWidget2d::new(
+            points,
+            self.samples_2d,
+            self.viewport_2d,
+            self.renderer_2d.clone(),
+            animation,
+        );
+
+        Ok(SessionOutput::Plot {
+            title: format!(" y = {expression} "),
+            content: PaneContent::Plot2d(widget),
+        })
+    }
+
+    /**
+     * Tokenizes & parses expression, validates its variable
+     * identifier nodes (x, y, t if animated), and computes 
+     * z = f(x, y) samples to build a Widget for PaneContent
+     */
+    fn build_plot_3d(
+        &self,
+        expression: String,
+        animated: bool,
+    ) -> Result<SessionOutput, String> {
+        // Tokenize / parse expression into AST 
+        let mut tokenizer = Tokenizer::new(&expression);
+        let tokens = tokenizer.tokenize()?;
+
+        let mut parser = Parser::new(tokens);
+        let tree = parser.parse_expression(0)?;
+
+        // Validate variable identifiers
+        tree.validate_variables(3, animated)?;
+
+        // Create placehold Mesh grid to compute samples
+        // - Placeholder function z = 0, ensuring all finite vertices initially
         let viewport = &self.viewport_3d;
         let (x_samples, y_samples) = self.samples_3d;
 
-        let mesh = Mesh::surface(
+        let mut mesh = Mesh::surface(
             viewport.x_min,
             viewport.x_max,
             viewport.y_min,
             viewport.y_max,
             x_samples,
             y_samples,
-            function,
+            |_: f64, _: f64| { 0.0 },
         );
 
-        Ok(Object::new(mesh, self.transform_3d))
-    }
+        sample_surface_at(&tree, 0.0, &mut mesh);
 
-    /**
-     * Parses f(x) expression string and returns (x, f(x))
-     * points sampled over viewport range
-     */
-    fn sample_expression(&self, expression: &str) -> Result<Vec<Point>, String> {
-        // Tokenize expression
-        let mut tokenizer = Tokenizer::new(expression);
-        let tokens = tokenizer.tokenize()?;
+        // Define animation parameters if enabled
+        let animation = if animated {
+            Some(Animation {
+                expression: tree,
+                time: 0.0,
+                speed: 1.0,
+                period: 5.0,
+                phase: 0.0,
+                playing: true,
+            }) 
+        } else {
+            None
+        };
 
-        // Parse tokens into abstract syntax tree
-        let mut parser = Parser::new(tokens);
-        let tree = parser.parse_expression(0)?;
+        // Create Widget for PaneContent
+        let widget = PlotWidget3d::new(
+            Object::new(mesh, self.transform_3d),
+            self.camera_3d.clone(),
+            self.viewport_3d,
+            self.renderer_3d.clone(),
+            animation,
+        );
 
-        // Compute (x, f(x)) over x-samples in viewport range
-        let mut vars = HashMap::from([("x".to_string(), 0.0)]);
-
-        let points = (0..self.samples_2d)
-            .filter_map(|i| {
-                let t = i as f64 / (self.samples_2d - 1) as f64;
-                let x = self.viewport_2d.x_min
-                    + t * (self.viewport_2d.x_max - self.viewport_2d.x_min);
-                
-                *vars.get_mut("x").unwrap() = x;
-                let y = tree.evaluate(&vars);
-
-                y.is_finite().then_some(Point::new(x, y))
-            })
-            .collect();
-
-        Ok(points)
+        Ok(SessionOutput::Plot { 
+            title: format!(" z = {expression} "), 
+            content: PaneContent::Plot3d(widget) 
+        })
     }
 
     pub fn execute(
@@ -181,62 +242,78 @@ impl Session {
         command: Command
     ) -> Result<SessionOutput, String> {
         match command {
+            // -------------------------
+            // Plot / Plot3d / Replot
+            // -------------------------
             Command::Plot(expression) => {
-                match self.active_plot_mode {
-                    PlotMode::TwoD => {
-                        let points = match self.sample_expression(&expression) {
-                            Ok(points) => points,
-                            Err(error) => return Ok(SessionOutput::Message(error)),
-                        };
-
-                        self.last_plots.insert(
-                            pane_id,
-                            LastPlot::Plot2d(expression),
-                        );
-                        Ok(SessionOutput::Plot2d(points))
-                    }
-                    PlotMode::ThreeD => {
-                        let surface = match self.sample_surface(&expression) {
-                            Ok(surface) => surface,
-                            Err(error) => return Ok(SessionOutput::Message(error)),
-                        };
-
-                        self.last_plots.insert(
-                            pane_id,
-                            LastPlot::Plot3d(expression),
-                        );
-                        Ok(SessionOutput::Plot3d(surface))
-                    }
-                }
+                self.plot_for_pane(
+                    pane_id,
+                    expression,
+                    self.active_plot_mode,
+                    false,
+                )
             }
 
             Command::Plot3d(expression) => {
-                self.active_plot_mode = PlotMode::ThreeD;
-                let surface = self.sample_surface(&expression)?;
-                self.last_plots.insert(
+                let output = self.plot_for_pane(
                     pane_id,
-                    LastPlot::Plot3d(expression),
-                );
+                    expression,
+                    PlotMode::ThreeD,
+                    false,
+                )?;
 
-                Ok(SessionOutput::Plot3d(surface))
+                self.active_plot_mode = PlotMode::ThreeD;
+                Ok(output)
             }
 
             Command::Replot => {
-                match &self.last_plots.get(&pane_id) {
-                    Some(LastPlot::Plot2d(expression)) => {
-                        let points = self.sample_expression(&expression)?;
-                        Ok(SessionOutput::Plot2d(points))
-                    }
+                let Some(last) = self.last_plots.get(&pane_id).cloned() else {
+                    return Ok(SessionOutput::Message(
+                        "This pane has no previous plot".into(),
+                    ));
+                };
 
-                    Some(LastPlot::Plot3d(expression)) => {
-                        let surface = self.sample_surface(&expression)?;
-                        Ok(SessionOutput::Plot3d(surface))
-                    }
+                self.plot_for_pane(
+                    pane_id,
+                    last.expression,
+                    last.mode,
+                    last.animated,
+                )
+            }
 
-                    _ => Ok(SessionOutput::Message(
-                        "This pane has no previous plot".into()
-                    ))
-                }
+            // -------------------------
+            // Animate / Animate3d
+            // -------------------------
+            Command::Animate(expression) => {
+                self.plot_for_pane(
+                    pane_id,
+                    expression,
+                    self.active_plot_mode,
+                    true,
+                )
+            }
+
+            Command::Animate3d(expression) => {
+                let output = self.plot_for_pane(
+                    pane_id,
+                    expression,
+                    PlotMode::ThreeD,
+                    true,
+                )?;
+
+                self.active_plot_mode = PlotMode::ThreeD;
+                Ok(output)
+            }
+
+            // -------------------------
+            // Animation: Pause, Resume, SetSpeed, SetTime
+            // are handled in app.rs
+            // -------------------------
+            Command::Pause
+            | Command::Resume
+            | Command::SetSpeed(_)
+            | Command::SetTime(_) => {
+                Err("Animation controls must be handled by the active pane".into())
             }
 
             Command::SetDimension(dimension) => {

@@ -57,17 +57,6 @@ impl Default for PlotStyle2d {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct PlotRenderer2d {
-    pub style: PlotStyle2d,
-    pub aspect: PlotAspect2d,
-    pub pad_width: usize,
-    pub pad_height: usize,
-    pub show_axes: bool,
-    pub show_ticks: bool,
-    pub num_ticks: usize,
-    pub show_border: bool,
-}
 
 #[derive(Debug, Clone, Copy)]
 pub enum PlotAspect2d {
@@ -151,6 +140,18 @@ impl Default for PlotViewport2d {
     }
 }
 
+
+#[derive(Debug, Clone)]
+pub struct PlotRenderer2d {
+    pub style: PlotStyle2d,
+    pub aspect: PlotAspect2d,
+    pub pad_width: usize,
+    pub pad_height: usize,
+    pub show_axes: bool,
+    pub show_ticks: bool,
+    pub num_ticks: usize,
+    pub show_border: bool,
+}
 
 impl PlotRenderer2d {
     /**
