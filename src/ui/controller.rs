@@ -1,6 +1,7 @@
 use crossterm::event::{KeyEvent};
 
 use crate::rendering::{Buffer, Cell};
+use super::{PlotController, WaveformController};
 
 
 #[derive(Debug, PartialEq)]
@@ -27,23 +28,57 @@ pub struct Animation {
 /**
  * 
  */
-pub trait Widget {
+pub enum ContentController {
+    Plot(PlotController),
+    Waveform(WaveformController),
+}
+
+
+/**
+ * Controller trait for different pane types. Implementations own state
+ * and handle rendering, keyboard input, and time-based updates.
+ */
+pub trait PaneController {
     fn render(&self, target: &mut Buffer);
     fn handle_key(&mut self, key: KeyEvent) -> KeyResult;
-    fn update(&mut self, _delta_s: f64) -> bool {
+    fn update(&mut self, delta_s: f64) -> bool {
         false
     }
 }
 
 
+impl PaneController for ContentController {
+    fn render(&self, target: &mut Buffer) {
+        match self {
+            Self::Plot(controller) => controller.render(target),
+            Self::Waveform(controller) => controller.render(target),
+        }
+    }
+
+    fn handle_key(&mut self, key: KeyEvent) -> KeyResult {
+        match self {
+            Self::Plot(controller) => controller.handle_key(key),
+            Self::Waveform(controller) => controller.handle_key(key),
+        }
+    }
+
+    fn update(&mut self, delta_s: f64) -> bool {
+        match self {
+            Self::Plot(controller) => controller.update(delta_s),
+            Self::Waveform(controller) => controller.update(delta_s),
+        }
+    }
+}
+
+
 /**
- * Widget for rendering typed commands in bottom Pane
+ * Holds and renders typed commands in the bottom pane.
  */
-pub struct CommandWidget {
+pub struct CommandController {
     pub text: String,
 }
 
-impl Widget for CommandWidget {
+impl PaneController for CommandController {
     fn render(&self, target: &mut Buffer) {
         // Leave room for the pane's border
         if target.width() < 3 || target.height() < 3 {

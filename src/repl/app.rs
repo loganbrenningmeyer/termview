@@ -8,15 +8,16 @@ use crossterm::{
 use super::{Command, Session, SessionOutput};
 use crate::{
     ui::{
-        CommandWidget,
+        ContentController,
+        CommandController,
         FocusState,
         InteractionMode,
         KeyResult,
         Layout,
         Pane,
-        PlotState,
+        PlotController,
         Rect,
-        Widget,
+        PaneController,
     },
     terminal::{self as term, TerminalPresenter},
 };
@@ -57,9 +58,9 @@ enum SplitDirection {
 pub struct TermviewApp {
     session: Session,
     presenter: TerminalPresenter,
-    command_pane: Pane<CommandWidget>,
+    command_pane: Pane<CommandController>,
     command_cursor: usize,
-    panes: HashMap<usize, Pane<PlotState>>,
+    panes: HashMap<usize, Pane<ContentController>>,
     active_pane: usize,
     next_pane_id: usize,
     layout: Layout,
@@ -80,7 +81,7 @@ impl TermviewApp {
                 Rect::new(0, 0, 0, 0),
                 InteractionMode::Static,
                 FocusState::InactiveCommand,
-                CommandWidget { text: String::new() },
+                CommandController { text: String::new() },
             ),
             command_cursor: 0,
             panes: HashMap::from([(
@@ -89,7 +90,7 @@ impl TermviewApp {
                     area, 
                     InteractionMode::Static, 
                     FocusState::ActivePane,
-                    PlotState::default(),
+                    ContentController::Plot(PlotController::default()),
                 ),
             )]),
             active_pane: 0,
@@ -148,55 +149,11 @@ impl TermviewApp {
             return Ok(CommandEffect::Quit);
         }
 
-        // -------------------------
-        // Animation Pause / Resume / Speed & Time
-        // -------------------------
-        if matches!(
-            &command,
-            Command::Pause | Command::Resume |
-            Command::SetSpeed(_) | Command::SetTime(_)
-        ) {
-            let pane = self.get_active_pane()?;
-            let plot_state = &mut pane.widget;
-
-            let animation = plot_state.content
-                .animation_mut()
-                .ok_or("The active pane has no animation")?;
-        
-            match &command {
-                Command::Pause => animation.playing = false,
-                Command::Resume => animation.playing = true,
-                
-                Command::SetSpeed(speed) => {
-                    if !speed.is_finite() {
-                        return Err("Animation speed must be finite".into());
-                    }
-                    
-                    animation.speed = *speed;
-                }
-                
-                Command::SetTime(time) => {
-                    if !time.is_finite() {
-                        return Err("Animation time must be finite".into())
-                    }
-                    animation.time = *time;
-                    animation.phase = *time;
-                    
-                    // Time elapsed, resample animation
-                    plot_state.resample();
-                }
-
-                _ => unreachable!(),
-            }
-
-            return Ok(CommandEffect::Redraw);   // redraw after animation updates
-        }
-
         let pane = self.panes
             .get_mut(&self.active_pane)
             .ok_or_else(|| io::Error::other("Active pane does not exist"))?;
 
-        let result = self.session.execute(&mut pane.widget, command)?;
+        let result = self.session.execute(&mut pane.controller, command)?;
 
         // -------------------------
         // Execute parsed Command with Session
@@ -211,9 +168,7 @@ impl TermviewApp {
                 Ok(CommandEffect::None)
             }
 
-            SessionOutput::PlotUpdated { title } => {
-                let pane = self.get_active_pane()?;
-
+            SessionOutput::PaneUpdated { title } => {
                 pane.set_title(title);
                 pane.mode = InteractionMode::Interactive;
 
@@ -241,14 +196,18 @@ impl TermviewApp {
         
         // Show command text input with _ cursor
         // - Give precedence to messages over typing
-        self.command_pane.widget.text = if let Some(message) = &self.message {
+        self.command_pane.controller.text = if let Some(message) = &self.message {
             format!(" {}", message.clone())     // show message if there is one
         } else if typing {
-            format!(" :{}_", self.command)
+            let (before, after) =
+                self.command.split_at(self.command_cursor);
+
+            format!(" :{before}▏{after}")
         } else {
             " Press : to enter a command".to_string()
         };
         
+        // Set CommandPane focus
         if typing {
             self.command_pane.set_focus(FocusState::ActiveCommand);
         } else {
@@ -257,7 +216,15 @@ impl TermviewApp {
 
         let frame = self.presenter.begin_frame();
 
-        for pane in self.panes.values_mut() {
+        // Render panes / set pane focus
+        for (&id, pane) in self.panes.iter_mut() {
+            let focus = if !typing && id == self.active_pane {
+                FocusState::ActivePane
+            } else {
+                FocusState::InactivePane
+            };
+
+            pane.set_focus(focus);
             pane.render_into(frame);
         }
 
@@ -334,11 +301,11 @@ impl TermviewApp {
                 last_update = now;
 
                 // If any pane is updated, re-present the output
-                // - widget.update() returns true when needing a redraw
+                // - controller.update() returns true when needing a redraw
                 let mut changed = false;
 
                 for pane in self.panes.values_mut() {
-                    if pane.widget.update(delta_s) {
+                    if pane.controller.update(delta_s) {
                         changed = true;
                     }
                 }
@@ -409,10 +376,12 @@ impl TermviewApp {
                                         Ok(CommandEffect::Redraw) => {
                                             self.input_mode = InputMode::Pane;
                                             self.command.clear();
+                                            self.command_cursor = 0;
                                         }
 
                                         Ok(CommandEffect::None) => {
                                             self.command.clear();
+                                            self.command_cursor = 0;
                                         }
 
                                         Err(error) => {
@@ -427,6 +396,7 @@ impl TermviewApp {
                             CommandKeyResult::Cancel => {
                                 self.input_mode = InputMode::Pane;
                                 self.command.clear();
+                                self.command_cursor = 0;
                                 self.message = None;
                                 self.present(output)?;
                             }
@@ -443,6 +413,7 @@ impl TermviewApp {
                     if key.code == KeyCode::Char(':') {
                         self.input_mode = InputMode::Command;
                         self.command.clear();
+                        self.command_cursor = 0;
                         self.message = None;
 
                         self.present(output)?;
@@ -453,7 +424,16 @@ impl TermviewApp {
                     // Next active pane
                     // -------------------------
                     if key.code == KeyCode::Tab {
-                        self.next_pane()?;
+                        if self.panes.len() > 1 {
+                            self.next_pane()?;
+                        // One pane: switch to command pane
+                        } else {
+                            self.input_mode = InputMode::Command;
+                            self.command.clear();
+                            self.command_cursor = 0;
+                            self.message = None;
+                            self.get_active_pane()?.set_focus(FocusState::InactivePane);
+                        }
 
                         self.present(output)?;
                         continue
@@ -491,7 +471,7 @@ impl TermviewApp {
                     }
 
                     // -------------------------
-                    // Key handled by Pane Widget
+                    // Key handled by the pane's controller
                     // -------------------------
                     let pane = self.get_active_pane()?;
                     let result = pane.handle_key(key);
@@ -501,8 +481,9 @@ impl TermviewApp {
                             self.present(output)?
                         }
                         KeyResult::Exit => {
-                            self.input_mode = InputMode::Pane;
+                            self.input_mode = InputMode::Command;
                             self.command.clear();
+                            self.command_cursor = 0;
                             self.message = None;
                             
                             self.present(output)?;
@@ -525,11 +506,17 @@ impl TermviewApp {
         match key.code {
             // Normal equation typing
             KeyCode::Char(c) 
-                if (c.is_alphanumeric() 
+                if (c.is_ascii_alphanumeric()
                     || matches!(c, '+' | '-' | '*' | '/' | '^' | '(' | ')' | ' ' | '.' | '=')) => 
             {
                 self.command.insert(self.command_cursor, c);
                 self.command_cursor += 1;
+                CommandKeyResult::Changed
+            }
+
+            // Switch to Pane
+            KeyCode::Tab => {
+                self.input_mode = InputMode::Pane;
                 CommandKeyResult::Changed
             }
 
@@ -544,7 +531,7 @@ impl TermviewApp {
             }
 
             KeyCode::Right => {
-                if self.command_cursor <= self.command.len() {
+                if self.command_cursor < self.command.len() {
                     self.command_cursor += 1;
                     CommandKeyResult::Changed
                 } else {
@@ -593,7 +580,7 @@ impl TermviewApp {
      * Update the Pane layouts recursively
      */
     fn relayout(&mut self, width: usize, height: usize) {
-        // Reserve 3 lines for command widget (borders + text row)
+        // Reserve 3 lines for the command pane (borders + text row)
         let command_height = height.min(3);
         let plot_height = height - command_height;
 
@@ -681,7 +668,7 @@ impl TermviewApp {
                 next_area,
                 InteractionMode::Static,
                 FocusState::ActivePane,
-                PlotState::default(),
+                ContentController::Plot(PlotController::default()),
             ),
         );
 
@@ -743,7 +730,7 @@ impl TermviewApp {
     /**
      * Mutably get active pane, otherwise error if not found
      */
-    fn get_active_pane(&mut self) -> io::Result<&mut Pane<PlotState>> {
+    fn get_active_pane(&mut self) -> io::Result<&mut Pane<ContentController>> {
         self.panes
             .get_mut(&self.active_pane)
             .ok_or_else(|| io::Error::other("Active pane does not exist").into())

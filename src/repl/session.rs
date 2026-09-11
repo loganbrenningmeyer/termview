@@ -1,4 +1,3 @@
-use super::Command;
 use crate::{
     geometry::{Mesh, sample_surface_at, sample_curve_at}, 
     parsing::{TokenNode}, 
@@ -8,23 +7,27 @@ use crate::{
     }, 
     ui::{
         Animation, 
+        ContentController,
         LastPlot,
         PlotContent, 
         PlotMode,
-        PlotState, 
+        PlotController, 
         PlotView2d,
         PlotView3d,
         CurvePlot, 
         SurfacePlot,
+        Waveform,
+        WaveformController,
     },
 };
+use super::Command;
 
 
 pub enum SessionOutput {
     None,
     Message(String),
     Redraw,
-    PlotUpdated { title: String },
+    PaneUpdated { title: String },
 }
 
 
@@ -32,13 +35,13 @@ pub struct Session;
 
 impl Session {
     /**
-     * Replace current PlotState's content with the newly
+     * Replace current PlotController's content with the newly
      * built CurvePlot or SurfacePlot built from the given
      * expression string, PlotMode, and animation mode
      */
     fn replace_plot(
         &mut self,
-        plot_state: &mut PlotState,
+        plot_controller: &mut PlotController,
         expression: String,
         mode: PlotMode,
         animated: bool,
@@ -46,7 +49,7 @@ impl Session {
         let (content, title) = match mode {
             PlotMode::TwoD => {
                 let curve = self.build_curve(
-                    &plot_state.view_2d, 
+                    &plot_controller.view_2d, 
                     &expression, 
                     animated,
                 )?;
@@ -55,7 +58,7 @@ impl Session {
             }
             PlotMode::ThreeD => {
                 let surface = self.build_surface(
-                    &plot_state.view_3d,
+                    &plot_controller.view_3d,
                     &expression,
                     animated,
                 )?;
@@ -64,20 +67,20 @@ impl Session {
             }
         };
 
-        plot_state.content = content;
-        plot_state.last_plot = Some(LastPlot { 
+        plot_controller.content = content;
+        plot_controller.last_plot = Some(LastPlot { 
             expression,
             mode,
             animated,
         });
 
-        Ok(SessionOutput::PlotUpdated { title })
+        Ok(SessionOutput::PaneUpdated { title })
     }
 
     /**
      * Tokenizes & parses expression, validates its variable
      * identifier nodes (x, t if animated), and computes y = f(x) samples to
-     * build a Widget for PaneContent
+     * build a CurvePlot for PlotContent
      */
     fn build_curve(
         &self,
@@ -130,7 +133,7 @@ impl Session {
     /**
      * Tokenizes & parses expression, validates its variable
      * identifier nodes (x, y, t if animated), and computes 
-     * z = f(x, y) samples to build a Widget for PaneContent
+     * z = f(x, y) samples to build a SurfacePlot for PlotContent
      */
     fn build_surface(
         &self,
@@ -184,10 +187,135 @@ impl Session {
         Ok(surface)
     }
 
+    /**
+     * Build WaveformController Pane, replacing the current 
+     * ContentController Pane and retaining its size
+     */
+    fn open_waveform(
+        &self, 
+        controller: &mut ContentController,
+        expression: &str
+    ) -> Result<SessionOutput, String> {
+        // Build Waveform with default values
+        let waveform = Waveform::build_waveform(
+            expression, 
+            0.0, 
+            std::f64::consts::TAU, 
+            2048,
+        )?;
+
+        // Construct WaveformController
+        let waveform_controller = WaveformController::new(waveform)?;
+
+        // Replace the current pane's controller
+        *controller = ContentController::Waveform(waveform_controller);
+
+        Ok(SessionOutput::PaneUpdated { 
+            title: format!(" y = {expression} "),
+        })
+    }
+
     pub fn execute(
         &mut self, 
-        plot_state: &mut PlotState,
+        controller: &mut ContentController,
         command: Command
+    ) -> Result<SessionOutput, String> {
+        match command {
+            // -------------------------
+            // Audio playback
+            // - Replace pane with waveform playback
+            // -------------------------
+            Command::Play(expression) => {
+                self.open_waveform(controller, &expression)
+            }
+
+            // -------------------------
+            // General commands
+            // -------------------------
+            Command::Help => {
+                Ok(SessionOutput::Message(Self::help_text()))
+            }
+            Command::Quit => Ok(SessionOutput::None),
+
+            // -------------------------
+            // 2D / 3D Plot
+            // - Replace pane with plot
+            // -------------------------
+            command @ (
+                Command::Plot(_)
+                | Command::Plot2d(_)
+                | Command::Plot3d(_)
+                | Command::Animate(_)
+                | Command::Animate2d(_)
+                | Command::Animate3d(_)
+            ) => {
+                // Already Plot pane, preserve view and settings
+                if let ContentController::Plot(plot) = controller {
+                    self.execute_plot(plot, command)
+                // Waveform pane, build Plot pane and replace waveform
+                } else {
+                    let mut plot = PlotController::default();
+                    let output = self.execute_plot(&mut plot, command)?;
+
+                    *controller = ContentController::Plot(plot);
+
+                    Ok(output) 
+                }
+            }
+
+            // -------------------------
+            // Commands acting on the current feature
+            // - Don't disrupt and replace the Pane
+            // -------------------------
+            command => match controller {
+                ContentController::Plot(plot) => {
+                    self.execute_plot(plot, command)
+                }
+                ContentController::Waveform(waveform) => {
+                    self.execute_waveform(waveform, command)
+                }
+            },
+        }
+    }
+
+    fn execute_waveform(
+        &mut self,
+        controller: &mut WaveformController,
+        command: Command,
+    ) -> Result<SessionOutput, String> {
+        match command {
+            Command::Pause => {
+                controller.playback.playing = false;
+                Ok(SessionOutput::Redraw)
+            }
+
+            Command::Resume => {
+                controller.playback.playing = true;
+                Ok(SessionOutput::Redraw)
+            }
+
+            Command::ShowAxes(show) => {
+                controller.view.renderer.show_axes = show;
+                Ok(SessionOutput::Redraw)
+            }
+
+            Command::Config => {
+                Ok(SessionOutput::Message(format!(
+                    "Frequency: {} Hz\nVolume: {}\nPlaying: {}",
+                    controller.playback.frequency,
+                    controller.playback.volume,
+                    controller.playback.playing,
+                )))
+            }
+
+            _ => Err("This command is not supported by waveform panes".into()),
+        }
+    }
+
+    fn execute_plot(
+        &mut self,
+        plot_controller: &mut PlotController,
+        command: Command,
     ) -> Result<SessionOutput, String> {
         match command {
             // -------------------------
@@ -195,46 +323,46 @@ impl Session {
             // -------------------------
             Command::Plot(expression) => {
                 self.replace_plot(
-                    plot_state,
+                    plot_controller,
                     expression,
-                    plot_state.active_plot_mode,
+                    plot_controller.active_plot_mode,
                     false,
                 )
             }
 
             Command::Plot2d(expression) => {
                 let output = self.replace_plot(
-                    plot_state, 
+                    plot_controller, 
                     expression, 
                     PlotMode::TwoD, 
                     false,
                 )?;
 
-                plot_state.active_plot_mode = PlotMode::TwoD;
+                plot_controller.active_plot_mode = PlotMode::TwoD;
                 Ok(output)
             }
 
             Command::Plot3d(expression) => {
                 let output = self.replace_plot(
-                    plot_state,
+                    plot_controller,
                     expression,
                     PlotMode::ThreeD,
                     false,
                 )?;
 
-                plot_state.active_plot_mode = PlotMode::ThreeD;
+                plot_controller.active_plot_mode = PlotMode::ThreeD;
                 Ok(output)
             }
 
             Command::Replot => {
-                let Some(last) = plot_state.last_plot.clone() else {
+                let Some(last) = plot_controller.last_plot.clone() else {
                     return Ok(SessionOutput::Message(
                         "This pane has no previous plot".into(),
                     ));
                 };
 
                 self.replace_plot(
-                    plot_state,
+                    plot_controller,
                     last.expression,
                     last.mode,
                     last.animated,
@@ -246,50 +374,82 @@ impl Session {
             // -------------------------
             Command::Animate(expression) => {
                 self.replace_plot(
-                    plot_state,
+                    plot_controller,
                     expression,
-                    plot_state.active_plot_mode,
+                    plot_controller.active_plot_mode,
                     true,
                 )
             }
 
             Command::Animate2d(expression) => {
                 let output = self.replace_plot(
-                    plot_state,
+                    plot_controller,
                     expression,
                     PlotMode::TwoD,
                     true,
                 )?;
 
-                plot_state.active_plot_mode = PlotMode::TwoD;
+                plot_controller.active_plot_mode = PlotMode::TwoD;
                 Ok(output)
             }
 
             Command::Animate3d(expression) => {
                 let output = self.replace_plot(
-                    plot_state,
+                    plot_controller,
                     expression,
                     PlotMode::ThreeD,
                     true,
                 )?;
 
-                plot_state.active_plot_mode = PlotMode::ThreeD;
+                plot_controller.active_plot_mode = PlotMode::ThreeD;
                 Ok(output)
             }
 
             // -------------------------
-            // Animation: Pause, Resume, SetSpeed, SetTime
-            // are handled in app.rs
+            // Animation Pause / Resume / Speed & Time
             // -------------------------
-            Command::Pause
-            | Command::Resume
-            | Command::SetSpeed(_)
-            | Command::SetTime(_) => {
-                Err("Animation controls must be handled by the active pane".into())
+            command @ (
+                Command::Pause 
+                | Command::Resume
+                | Command::SetSpeed(_)
+                | Command::SetTime(_)
+            ) => {
+                let animation = plot_controller
+                    .content
+                    .animation_mut()
+                    .ok_or_else(|| "The current plot has no animation".to_string())?;
+
+                match command {
+                    Command::Pause => animation.playing = false,
+                    Command::Resume => animation.playing = true,
+                    
+                    Command::SetSpeed(speed) => {
+                        if !speed.is_finite() {
+                            return Err("Animation speed must be finite".into());
+                        }
+                        
+                        animation.speed = speed;
+                    }
+                    
+                    Command::SetTime(time) => {
+                        if !time.is_finite() {
+                            return Err("Animation time must be finite".into())
+                        }
+                        animation.time = time;
+                        animation.phase = time;
+                        
+                        // Time elapsed, resample animation
+                        plot_controller.resample();
+                    }
+
+                    _ => unreachable!()
+                }
+
+                Ok(SessionOutput::Redraw)
             }
 
             Command::SetDimension(dimension) => {
-                plot_state.active_plot_mode = match dimension {
+                plot_controller.active_plot_mode = match dimension {
                     2 => PlotMode::TwoD,
                     3 => PlotMode::ThreeD,
                     _ => return Ok(SessionOutput::Message("plot dimension must be 2 or 3".into())),
@@ -313,13 +473,13 @@ impl Session {
                     return Ok(SessionOutput::Message("y_min must be less than y_max".into()));
                 }
 
-                match plot_state.active_plot_mode {
+                match plot_controller.active_plot_mode {
                     PlotMode::TwoD => {
                         if z_bounds.is_some() {
                             return Ok(SessionOutput::Message("2D view expects x and y bounds only".into()));
                         }
 
-                        plot_state.view_2d.viewport = PlotViewport2d {
+                        plot_controller.view_2d.viewport = PlotViewport2d {
                             x_min,
                             x_max,
                             y_min,
@@ -335,7 +495,7 @@ impl Session {
                             return Ok(SessionOutput::Message("z_min must be less than z_max".into()));
                         }
 
-                        plot_state.view_3d.viewport = PlotViewport3d {
+                        plot_controller.view_3d.viewport = PlotViewport3d {
                             x_min,
                             x_max,
                             y_min,
@@ -350,7 +510,7 @@ impl Session {
             }
 
             Command::SetProjection(proj) => {
-                plot_state.view_3d.camera.projection = proj;
+                plot_controller.view_3d.camera.projection = proj;
 
                 Ok(SessionOutput::None)
             }
@@ -360,43 +520,43 @@ impl Session {
                     return Ok(SessionOutput::Message("samples must be at least 2".into()));
                 }
 
-                match plot_state.active_plot_mode {
-                    PlotMode::TwoD => plot_state.view_2d.samples = samples,
-                    PlotMode::ThreeD => plot_state.view_3d.samples = (samples, samples),
+                match plot_controller.active_plot_mode {
+                    PlotMode::TwoD => plot_controller.view_2d.samples = samples,
+                    PlotMode::ThreeD => plot_controller.view_3d.samples = (samples, samples),
                 }
                 Ok(SessionOutput::None)
             }
 
             Command::ShowAxes(show) => {
-                match plot_state.active_plot_mode {
-                    PlotMode::TwoD => plot_state.view_2d.renderer.show_axes = show,
-                    PlotMode::ThreeD => plot_state.view_2d.renderer.show_axes = show,
+                match plot_controller.active_plot_mode {
+                    PlotMode::TwoD => plot_controller.view_2d.renderer.show_axes = show,
+                    PlotMode::ThreeD => plot_controller.view_2d.renderer.show_axes = show,
                 }
                 Ok(SessionOutput::None)
             }
             
             Command::ShowTicks(show) => {
-                match plot_state.active_plot_mode {
-                    PlotMode::TwoD => plot_state.view_2d.renderer.show_ticks = show,
+                match plot_controller.active_plot_mode {
+                    PlotMode::TwoD => plot_controller.view_2d.renderer.show_ticks = show,
                     PlotMode::ThreeD => {
-                        plot_state.view_3d.renderer.axes_renderer.show_ticks = show;
-                        plot_state.view_3d.renderer.axes_renderer.show_labels = show;
+                        plot_controller.view_3d.renderer.axes_renderer.show_ticks = show;
+                        plot_controller.view_3d.renderer.axes_renderer.show_labels = show;
                     }
                 }
                 Ok(SessionOutput::None)
             }
 
             Command::ShowBorder(show) => {
-                match plot_state.active_plot_mode {
-                    PlotMode::TwoD => plot_state.view_2d.renderer.show_border = show,
-                    PlotMode::ThreeD => plot_state.view_3d.renderer.show_border = show,
+                match plot_controller.active_plot_mode {
+                    PlotMode::TwoD => plot_controller.view_2d.renderer.show_border = show,
+                    PlotMode::ThreeD => plot_controller.view_3d.renderer.show_border = show,
                 }
                 Ok(SessionOutput::None)
             }
 
             Command::Config => {
                 Ok(SessionOutput::Message(
-                    self.config_text(plot_state)
+                    self.config_text(plot_controller)
                 ))
             }
 
@@ -409,23 +569,25 @@ impl Session {
             Command::Quit => {
                 Ok(SessionOutput::None)
             }
+
+            _ => Ok(SessionOutput::None)
         }
     }
 
     /**
      * Print current PlotViewport / PlotRenderer configuration
      */
-    fn config_text(&self, plot_state: &PlotState) -> String {
-        let viewport_2d = &plot_state.view_2d.viewport;
-        let renderer_2d = &plot_state.view_2d.renderer;
-        let samples_2d = plot_state.view_2d.samples;
+    fn config_text(&self, plot_controller: &PlotController) -> String {
+        let viewport_2d = &plot_controller.view_2d.viewport;
+        let renderer_2d = &plot_controller.view_2d.renderer;
+        let samples_2d = plot_controller.view_2d.samples;
 
-        let viewport_3d = &plot_state.view_3d.viewport;
-        let renderer_3d = &plot_state.view_3d.renderer;
-        let samples_3d = plot_state.view_3d.samples;
-        let camera_3d = &plot_state.view_3d.camera;
+        let viewport_3d = &plot_controller.view_3d.viewport;
+        let renderer_3d = &plot_controller.view_3d.renderer;
+        let samples_3d = plot_controller.view_3d.samples;
+        let camera_3d = &plot_controller.view_3d.camera;
 
-        let active_settings = match plot_state.active_plot_mode {
+        let active_settings = match plot_controller.active_plot_mode {
             PlotMode::TwoD => format!(
             r#"
 Current settings

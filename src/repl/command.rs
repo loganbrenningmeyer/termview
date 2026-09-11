@@ -25,6 +25,8 @@ pub enum Command {
     Plot3d(String),
     Replot,
 
+    Play(String),
+
     Animate(String),
     Animate2d(String),
     Animate3d(String),
@@ -93,6 +95,8 @@ impl Command {
             ["a2", args @ ..] | ["animate2d", args @ ..] => Self::parse_animate2d(args),
             ["a3", args @ ..] | ["animate3d", args @ ..] => Self::parse_animate3d(args),
 
+            ["play", args @ ..] => Self::parse_play(args),
+
             ["pause"]  => Ok(Command::Pause),
             ["resume"] => Ok(Command::Resume),
 
@@ -105,10 +109,17 @@ impl Command {
     }
 
     // -------------------------
+    // termview> play <function>
+    // -------------------------
+    fn parse_play(args: &[&str]) -> Result<Command, String> {
+        let function_str = args.join("");
+        Ok(Command::Play(function_str))
+    }
+
+    // -------------------------
     // termview> plot <function>
     // -------------------------
     fn parse_plot(args: &[&str]) -> Result<Command, String> {
-        // Remove whitespace / combine into String
         let function_str = args.join("");
         Ok(Command::Plot(function_str))
     }

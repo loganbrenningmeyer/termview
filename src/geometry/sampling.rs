@@ -28,7 +28,7 @@ pub fn sample_curve_at(
     points.clear();
 
     // Split x range into num samples
-    for x in rangef(x_min, x_max, samples) {
+    for x in rangef(x_min, x_max, samples, true) {
         *vars.get_mut("x").unwrap() = x;
         let y = expression.evaluate(&vars);
 

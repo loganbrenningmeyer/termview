@@ -1,19 +1,27 @@
+mod audio;
+mod controller;
 mod layout;
 mod pane;
-mod widget;
+mod plot;
+mod waveform;
 
+pub use audio::AudioEngine;
 pub use layout::{Layout, Rect};
 pub use pane::{
     FocusState, 
     InteractionMode, 
-    LastPlot,
-    PlotMode,
     Pane, 
+
+};
+pub use plot::{
+    LastPlot,
     PlotContent,
-    PlotState,
+    PlotMode,
+    PlotController,
     PlotView2d,
     PlotView3d,
     CurvePlot,
     SurfacePlot,
 };
-pub use widget::{Animation, KeyResult, CommandWidget, Widget};
+pub use controller::{Animation, KeyResult, ContentController, CommandController, PaneController};
+pub use waveform::{PlaybackState, Waveform, WaveformController};
