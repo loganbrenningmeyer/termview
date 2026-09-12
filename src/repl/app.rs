@@ -261,7 +261,14 @@ impl TermviewApp {
                 ((frame.width() - help_text.chars().count()) as f32 / 2.0).round() as isize
             };
 
-            draw_text(frame, x, y, help_text, Color::Rgb(255, 255, 255), false);
+            draw_text(
+                frame, 
+                x, 
+                y, 
+                help_text, 
+                Color::Rgb(255, 255, 255), 
+                false
+            );
         }
 
         self.presenter.present(output)

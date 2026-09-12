@@ -1,10 +1,10 @@
 use std::sync::{
     Arc, atomic::{AtomicBool, AtomicU32},
 };
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::KeyCode;
 use std::collections::HashMap;
 
-use crate::geometry::Point;
+use crate::{geometry::Point, rendering::{Color, draw_text}};
 use crate::math::rangef;
 use crate::parsing::TokenNode;
 use super::{
@@ -116,6 +116,23 @@ impl PaneController for WaveformController {
             &self.view.viewport,
             target,
         );
+
+        // Place current frequency top-right
+        let label = format!(" {:.0} Hz ", self.playback.frequency);
+        let label_width = label.chars().count();
+
+        if target.width() > label_width + 2 {
+            let x = (target.width() - label_width - 2) as isize;
+
+            draw_text(
+                target,
+                x - 2,
+                1,
+                &label,
+                Color::Rgb(205, 205, 215),
+                true,
+            );
+        }
     }
 
     /**
