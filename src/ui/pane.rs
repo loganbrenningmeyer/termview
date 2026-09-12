@@ -1,5 +1,6 @@
 use crossterm::event::{KeyEvent};
 
+
 use super::{
     KeyResult, 
     Rect, 
@@ -76,9 +77,10 @@ impl<C: PaneController> Pane<C> {
         draw_text(
             &mut self.buffer,
             2,
-            0,
+            1,
             &self.title,
             Color::Rgb(255, 255, 255),
+            true,
         );
 
         frame.blit(&mut self.buffer, self.area.x, self.area.y);

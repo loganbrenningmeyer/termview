@@ -86,15 +86,40 @@ pub fn draw_text(
     y: isize,
     text: &str,
     color: Color,
+    border: bool,
 ) {
+    // Prepare border offset
+    let (x_new, y_new) = if border {
+        (x + 1, y + 1)
+    } else {
+        (x, y)
+    };
+
     for (offset, ch) in text.chars().enumerate() {
         let Ok(offset) = isize::try_from(offset) else {
             break;
         };
 
+        if border {
+            // Left / bottom-left / top-left borders
+            if offset == 0 {
+                buffer.set(x_new - 1, y_new, Cell { ch: VERTICAL, fg: color });
+                buffer.set(x_new - 1, y_new - 1, Cell { ch: TOP_LEFT_RD, fg: color });
+                buffer.set(x_new - 1, y_new + 1, Cell { ch: BOTTOM_LEFT_RD, fg: color });
+            // Right / bottom-right / top-right borders
+            } else if offset == text.chars().count() as isize - 1 {
+                buffer.set(x_new + offset + 1, y_new, Cell { ch: VERTICAL, fg: color });
+                buffer.set(x_new + offset + 1, y_new - 1, Cell { ch: TOP_RIGHT_RD, fg: color });
+                buffer.set(x_new + offset + 1, y_new + 1, Cell { ch: BOTTOM_RIGHT_RD, fg: color });
+            }
+            // Top / bottom horizontal
+            buffer.set(x_new + offset, y_new - 1, Cell { ch: HORIZONTAL, fg: color });
+            buffer.set(x_new + offset, y_new + 1, Cell { ch: HORIZONTAL, fg: color });
+        } 
+
         buffer.set(
-            x + offset,
-            y,
+            x_new + offset,
+            y_new,
             Cell { ch, fg: color },
         );
     }

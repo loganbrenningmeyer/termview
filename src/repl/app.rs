@@ -16,11 +16,23 @@ use crate::{
         Layout,
         Pane,
         PlotController,
+        PlotMode,
         Rect,
         PaneController,
     },
+    rendering::{Color, draw_text},
     terminal::{self as term, TerminalPresenter},
 };
+
+
+const HELP_2D: &str =
+    "[↑↓←→/wasd] Pan │ [e] Zoom in │ [q] Zoom out │ [esc] Focus prompt ";
+
+const HELP_3D: &str =
+    "[↑↓←→/wasd] Orbit │ [e] Zoom in │ [q] Zoom out │ [r] Reset camera │ [esc] Focus prompt";
+
+const HELP_WAVEFORM: &str =
+    "[↑/↓] Frequency up/down │ [space] Play/pause │ [esc] Focus prompt";
 
 
 #[derive(Debug, PartialEq, Eq)]
@@ -214,6 +226,15 @@ impl TermviewApp {
             self.command_pane.set_focus(FocusState::InactiveCommand);
         }
 
+        // Determine 2D / 3D / Waveform active pane help text
+        let help_text = match &self.get_active_pane()?.controller {
+            ContentController::Plot(plot) => match plot.active_plot_mode {
+                PlotMode::TwoD => HELP_2D,
+                PlotMode::ThreeD => HELP_3D,
+            },
+            ContentController::Waveform(_) => HELP_WAVEFORM,
+        };
+
         let frame = self.presenter.begin_frame();
 
         // Render panes / set pane focus
@@ -229,6 +250,19 @@ impl TermviewApp {
         }
 
         self.command_pane.render_into(frame);
+
+        // Draw app-wide help after the panes
+        if frame.height() > 0 {
+            let y = (frame.height() - 4) as isize;
+
+            let x: isize = if help_text.chars().count() >= frame.width() {
+                2 
+            } else {
+                ((frame.width() - help_text.chars().count()) as f32 / 2.0).round() as isize
+            };
+
+            draw_text(frame, x, y, help_text, Color::Rgb(255, 255, 255), false);
+        }
 
         self.presenter.present(output)
     }

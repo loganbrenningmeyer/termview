@@ -327,6 +327,7 @@ impl AxesRenderer3d {
                     label_y,
                     &text,
                     axis.label_style.fg,
+                    false
                 );
 
                 if is_origin {
@@ -433,6 +434,7 @@ impl AxesRenderer3d {
             label_y,
             &axis.label.to_string(),
             label_cell.fg,
+            false
         );
     }
 
