@@ -314,7 +314,7 @@ impl Default for PlotRenderer2d {
             pad_height: 2,
             show_axes: true,
             show_ticks: true,
-            num_ticks: 10,
+            num_ticks: 6,
             show_border: true,
         }
     }

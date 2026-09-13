@@ -145,6 +145,45 @@ impl PaneController for PlotController {
 
         true
     }
+
+    /**
+     * Config text block for rendering in Pane
+     */
+    fn config_text(&self) -> Vec<String> {
+        match self.active_plot_mode {
+            PlotMode::TwoD => vec![
+                "Dimension      2D".to_string(),
+                format!(
+                    "View           X: ({}, {})",
+                    self.view_2d.viewport.x_min, self.view_2d.viewport.x_max,
+                ),
+                format!(
+                    "               Y: ({}, {})",
+                    self.view_2d.viewport.y_min, self.view_2d.viewport.y_max,
+                ),
+                format!("Samples        {}", self.view_2d.samples),
+                format!("Axes           {}", self.on_off(self.view_2d.renderer.show_axes)),
+                format!("Ticks          {}", self.on_off(self.view_2d.renderer.show_ticks)),
+            ],
+            PlotMode::ThreeD => vec![
+                "Dimension      3D".to_string(),
+                format!(
+                    "View           X: ({}, {})",
+                    self.view_3d.viewport.x_min, self.view_3d.viewport.x_max,
+                ),
+                format!(
+                    "               Y: ({}, {})",
+                    self.view_3d.viewport.y_min, self.view_3d.viewport.y_max,
+                ),
+                format!(
+                    "               Z: ({}, {})",
+                    self.view_3d.viewport.z_min, self.view_3d.viewport.z_max,
+                ),
+                format!("Samples        ({}, {})", self.view_3d.samples.0, self.view_3d.samples.1),
+                format!("Axes           {}", self.on_off(self.view_3d.renderer.show_axes)),
+            ]
+        }
+    }
 }
 
 impl Default for PlotController {

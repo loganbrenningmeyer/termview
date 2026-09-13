@@ -77,6 +77,137 @@ fn draw_text_in_area(
     }
 }
 
+
+/**
+ * Draws multiple lines of text in a block
+ */
+pub fn draw_text_block(
+    buffer: &mut Buffer,
+    x: isize,
+    y: isize,
+    text: Vec<String>,
+    color: Color,
+    border: bool,
+    title: &str,
+) {
+    // Determine block width / height
+    let Some(width) = text
+        .iter()
+        .map(|line| line.chars().count())
+        .max()
+    else {
+        return;
+    };
+    let width = width as isize;
+    let height = text.len() as isize;
+
+    // Prepare border offset
+    let (x_new, y_new) = if border {
+        (x + 1, y + 1)
+    } else {
+        (x, y)
+    };
+
+    // Write each line in
+    for (i, line) in text.iter().enumerate() {
+        draw_text(
+            buffer,
+            x_new,
+            y_new + i as isize,
+            line,
+            color,
+            false,
+        );
+    }
+
+    // Draw outer border
+    if border {
+        let area = PlotArea2d {
+            left: x_new,
+            right: x_new + width - 1,
+            top: y_new,
+            bottom: y_new + height - 1,
+        };
+
+        draw_border_area(buffer, area, color);
+    }
+
+    // Draw title at top left
+    if !title.is_empty() {
+        draw_text(
+            buffer,
+            x_new + 1,
+            y_new - 1,
+            title,
+            color,
+            false,
+        );
+    }
+}
+
+
+pub fn draw_border_area(
+    buffer: &mut Buffer,
+    area: PlotArea2d,
+    color: Color,
+) {
+    let width = area.right - area.left;
+    let height = area.bottom - area.top;
+
+    for x_offset in 0..=width {
+        for y_offset in 0..=height {
+            let x = area.left + x_offset;
+            let y = area.top + y_offset;
+
+            // -------------------------
+            // Corners
+            // -------------------------
+            // Top-left
+            if x_offset == 0 && y_offset == 0 
+            {
+                buffer.set(area.left - 1, area.top - 1, Cell { ch: TOP_LEFT_RD, fg: color });
+            } 
+            // Bottom-left
+            if x_offset == 0 && y_offset == height
+            {
+                buffer.set(area.left - 1, area.bottom + 1, Cell { ch: BOTTOM_LEFT_RD, fg: color });
+            }
+            // Top-right
+            if x_offset == width && y_offset == 0 
+            {
+                buffer.set(area.right + 1, area.top - 1, Cell { ch: TOP_RIGHT_RD, fg: color });
+            }
+            // Bottom-right
+            if x_offset == width && y_offset == height 
+            {
+                buffer.set(area.right + 1, area.bottom + 1, Cell { ch: BOTTOM_RIGHT_RD, fg: color });
+            }
+
+            // -------------------------
+            // Edges
+            // -------------------------
+            // Left & right
+            if x_offset == 0
+            {
+                buffer.set(area.left - 1, y, Cell { ch: VERTICAL, fg: color });
+            }
+            if x_offset == width 
+            {
+                buffer.set(area.right + 1, y, Cell { ch: VERTICAL, fg: color });
+            }
+            // Top & bottom
+            if y_offset == 0
+            {
+                buffer.set(x, area.top - 1, Cell { ch: HORIZONTAL, fg: color });
+            }
+            if y_offset == height
+            {
+                buffer.set(x, area.bottom + 1, Cell { ch: HORIZONTAL, fg: color });
+            }
+        }
+    }
+}
+
 /**
  * 
  */

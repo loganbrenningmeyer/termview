@@ -44,6 +44,12 @@ pub trait PaneController {
     fn update(&mut self, delta_s: f64) -> bool {
         false
     }
+    fn config_text(&self) -> Vec<String> {
+        Vec::new()
+    }
+    fn on_off(&self, value: bool) -> &'static str {
+        if value { "On" } else { "Off" }
+    }
 }
 
 
@@ -66,6 +72,13 @@ impl PaneController for ContentController {
         match self {
             Self::Plot(controller) => controller.update(delta_s),
             Self::Waveform(controller) => controller.update(delta_s),
+        }
+    }
+
+    fn config_text(&self) -> Vec<String> {
+        match self {
+            Self::Plot(controller) => controller.config_text(),
+            Self::Waveform(controller) => controller.config_text(),
         }
     }
 }

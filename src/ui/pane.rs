@@ -1,4 +1,4 @@
-use crossterm::event::{KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent};
 
 
 use super::{
@@ -8,7 +8,7 @@ use super::{
 };
 use crate::{
     rendering::{
-        draw_border, draw_text, 
+        draw_border, draw_text, draw_text_block,
         Buffer, 
         Color,
     },
@@ -26,6 +26,7 @@ pub struct Pane<C: PaneController> {
     pub buffer: Buffer,
     pub mode: InteractionMode,
     pub focus: FocusState,
+    pub show_config: bool,
     pub controller: C,
 }
 
@@ -37,6 +38,7 @@ impl<C: PaneController> Pane<C> {
             buffer: Buffer::new(area.width, area.height),
             mode,
             focus,
+            show_config: false,
             controller,
         }
     }
@@ -46,6 +48,12 @@ impl<C: PaneController> Pane<C> {
      * - e.g., 2D vs 3D commands
      */
     pub fn handle_key(&mut self, key: KeyEvent) -> KeyResult {
+        // Show config
+        if key.code == KeyCode::Char('c') {
+            self.show_config = !self.show_config;
+            return KeyResult::Changed;
+        }
+
         match self.mode {
             InteractionMode::Static => KeyResult::Ignored,
             InteractionMode::Interactive => {
@@ -83,6 +91,31 @@ impl<C: PaneController> Pane<C> {
             true,
         );
 
+        // Show config at the top-right of pane
+        if self.show_config {
+            let text = self.controller.config_text();
+            
+            if !text.is_empty() {
+                if let Some(text_width) = text
+                    .iter()
+                    .map(|line| line.chars().count())
+                    .max()
+                {
+                    let pane_width = self.buffer.width();
+                    
+                    draw_text_block(
+                        &mut self.buffer, 
+                        (pane_width - text_width - 4) as isize,
+                        1,
+                        text,
+                        Color::Rgb(255, 255, 255),
+                        true,
+                        "Current settings",
+                    );
+                }
+            }
+        }
+            
         frame.blit(&mut self.buffer, self.area.x, self.area.y);
     }
 
