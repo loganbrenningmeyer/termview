@@ -41,11 +41,18 @@ pub enum ContentController {
 pub trait PaneController {
     fn render(&self, target: &mut Buffer);
     fn handle_key(&mut self, key: KeyEvent) -> KeyResult;
-    fn update(&mut self, delta_s: f64) -> bool {
+    fn update(&mut self, _delta_s: f64) -> bool {
         false
     }
+
     fn config_text(&self) -> Vec<String> {
         Vec::new()
+    }
+    fn tag_text(&self) -> String {
+        String::new()
+    }
+    fn label_text(&self) -> String {
+        String::new()
     }
     fn on_off(&self, value: bool) -> &'static str {
         if value { "On" } else { "Off" }
@@ -79,6 +86,20 @@ impl PaneController for ContentController {
         match self {
             Self::Plot(controller) => controller.config_text(),
             Self::Waveform(controller) => controller.config_text(),
+        }
+    }
+
+    fn tag_text(&self) -> String {
+        match self {
+            Self::Plot(controller) => controller.tag_text(),
+            Self::Waveform(controller) => controller.tag_text(),
+        }
+    }
+
+    fn label_text(&self) -> String {
+        match self {
+            Self::Plot(controller) => controller.label_text(),
+            Self::Waveform(controller) => controller.label_text(),
         }
     }
 }

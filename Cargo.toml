@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+arc-swap = "1.9"
 cpal = "0.18.2"
 crossterm = "0.29"
 meval = "0.2.0"

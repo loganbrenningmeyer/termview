@@ -14,6 +14,7 @@ pub struct AudioEngine {
     pub stream: cpal::Stream,
     frequency: Arc<AtomicU32>,
     published_phase: Arc<AtomicU32>,
+    volume: Arc<AtomicU32>,
     playing: Arc<AtomicBool>,
 }
 
@@ -26,7 +27,8 @@ impl AudioEngine {
      */
     pub fn new<F>(
         amp_callback: F, 
-        freq_atomic: Arc<AtomicU32>, 
+        frequency_atomic: Arc<AtomicU32>, 
+        volume_atomic: Arc<AtomicU32>,
         playing_atomic: Arc<AtomicBool>,
     ) -> Result<Self, String> 
     where 
@@ -57,8 +59,8 @@ impl AudioEngine {
         let mut phase = 0.0f32;
 
         // Set frequency, phase, and playing shared Atomics
-        let frequency = Arc::clone(&freq_atomic);
-
+        let frequency = Arc::clone(&frequency_atomic);
+        let volume = Arc::clone(&volume_atomic);
         let published_phase = Arc::new(AtomicU32::new(
             0.0_f32.to_bits(),
         ));
@@ -71,9 +73,12 @@ impl AudioEngine {
                 config,
                 move |data: &mut [f32], _| {
                     for frame in data.chunks_mut(channels) {
-                        // Load frequency atomic
+                        // Load frequency / volume atomics
                         let frequency = f32::from_bits(
-                            freq_atomic.load(Ordering::Relaxed)
+                            frequency_atomic.load(Ordering::Relaxed)
+                        );
+                        let volume = f32::from_bits(
+                            volume_atomic.load(Ordering::Relaxed)
                         );
 
                         // If playing atomic false, shut sound off and return
@@ -83,8 +88,7 @@ impl AudioEngine {
                         }
 
                         // Callback to WaveformController for amplitude given phase
-                        let amplitude = amp_callback(phase);
-
+                        let amplitude = amp_callback(phase) * volume;
                         frame.fill(amplitude);
 
                         // Step phase forward
@@ -110,6 +114,7 @@ impl AudioEngine {
             stream,
             frequency,
             published_phase,
+            volume,
             playing,
         })
     }
@@ -123,6 +128,13 @@ impl AudioEngine {
     pub fn set_frequency(&self, frequency: f32) {
         self.frequency.store(
             frequency.to_bits(),
+            Ordering::Relaxed,
+        );
+    }
+
+    pub fn set_volume(&self, volume: f32) {
+        self.volume.store(
+            volume.clamp(0.0, 1.0).to_bits(),
             Ordering::Relaxed,
         );
     }

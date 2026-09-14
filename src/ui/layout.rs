@@ -78,6 +78,13 @@ impl Rect {
 }
 
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResizeAxis {
+    Horizontal, // move a column divider left/right
+    Vertical,   // move a row divider up/down
+}
+
+
 /**
  * Recursive tree layout of split rules for pane Rects
  */
@@ -126,6 +133,25 @@ impl Layout {
                 right.visit_areas(right_area, assign);
             }
         }
+    }
+
+    /**
+     * Resize pane and adjust its children/siblings
+     */
+    pub fn resize_pane(
+        &mut self,
+        target: usize,
+        axis: ResizeAxis,
+        amount: f32,
+    ) -> bool {
+        let Some(fraction) = self.resize_fraction(target, axis) else {
+            return false;
+        };
+
+        let next = (*fraction + amount).clamp(0.1, 0.9);
+        let changed = next != *fraction;
+        *fraction = next;
+        changed
     }
 
     /**
@@ -204,6 +230,64 @@ impl Layout {
             Self::Leaf { pane_id } => *pane_id,
             Self::RowSplit { top, .. } => top.first_pane_id(),
             Self::ColumnSplit { left, .. } => left.first_pane_id(),
+        }
+    }
+
+    /**
+     * Determine if a layout node contains the target pane ID
+     */
+    fn contains_pane(&self, target: usize) -> bool {
+        match self {
+            Self::Leaf { pane_id } => *pane_id == target,
+
+            Self::RowSplit { top: first, bottom: second, .. }
+            | Self::ColumnSplit { left: first, right: second, .. } => {
+                first.contains_pane(target) || second.contains_pane(target)
+            }
+        }
+    }
+
+    /**
+     * Find split closest to the active pane that matches
+     * the ResizeAxis and return a mutable reference to its fraction
+     * for resizing
+     */
+    fn resize_fraction(
+        &mut self,
+        target: usize,
+        axis: ResizeAxis,
+    ) -> Option<&mut f32> {
+        let (fraction, first, second, split_axis) = match self {
+            Self::Leaf { .. } => return None,
+
+            Self::RowSplit { fraction, top, bottom } => {
+                (fraction, top, bottom, ResizeAxis::Vertical)
+            }
+
+            Self::ColumnSplit { fraction, left, right } => {
+                (fraction, left, right, ResizeAxis::Horizontal)
+            }
+        };
+
+        // Follow only the branch containing the active pane.
+        let child = if first.contains_pane(target) {
+            first
+        } else if second.contains_pane(target) {
+            second
+        } else {
+            return None;
+        };
+
+        // Prefer a matching split closer to the pane.
+        if let Some(found) = child.resize_fraction(target, axis) {
+            return Some(found);
+        }
+
+        // Otherwise, use this ancestor if its axis matches.
+        if split_axis == axis {
+            Some(fraction)
+        } else {
+            None
         }
     }
 }

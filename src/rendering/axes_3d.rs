@@ -39,19 +39,19 @@ impl Default for AxesStyle3d {
     fn default() -> Self {
         Self {
             x: WireframeStyle {
-                edge: Cell::new('·').with_fg(Color::Rgb(190, 90, 100)),
-                vertex: Cell::new('•').with_fg(Color::Rgb(190, 90, 100)),
+                edge: Cell::new('·').with_fg(Color::X),
+                vertex: Cell::new('•').with_fg(Color::X),
             },
             y: WireframeStyle {
-                edge: Cell::new('·').with_fg(Color::Rgb(90, 180, 120)),
-                vertex: Cell::new('•').with_fg(Color::Rgb(90, 180, 120)),
+                edge: Cell::new('·').with_fg(Color::Y),
+                vertex: Cell::new('•').with_fg(Color::Y),
             },
             z: WireframeStyle {
-                edge: Cell::new('·').with_fg(Color::Rgb(90, 130, 200)),
-                vertex: Cell::new('•').with_fg(Color::Rgb(90, 130, 200)),
+                edge: Cell::new('·').with_fg(Color::Z),
+                vertex: Cell::new('•').with_fg(Color::Z),
             },
-            tick: Cell::new('.').with_fg(Color::Rgb(125, 125, 135)),
-            label: Cell::new(' ').with_fg(Color::Rgb(205, 205, 215)),
+            tick: Cell::new('.').with_fg(Color::GRAY),
+            label: Cell::new(' ').with_fg(Color::WHITE),
         }
     }
 }

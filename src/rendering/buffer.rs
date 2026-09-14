@@ -4,6 +4,27 @@ pub enum Color {
     Rgb(u8, u8, u8),
 }
 
+impl Color {
+    pub const WHITE: Self = Self::Rgb(255, 255, 255);
+    pub const BLACK: Self = Self::Rgb(0, 0, 0);
+    pub const RED: Self = Self::Rgb(255, 0, 0);
+    pub const GREEN: Self = Self::Rgb(0, 255, 0);
+    pub const BLUE: Self = Self::Rgb(0, 0, 255);
+    pub const YELLOW: Self = Self::Rgb(255, 255, 0);
+    pub const GRAY: Self = Self::Rgb(120, 120, 120);
+
+    pub const X: Self = Self::Rgb(190, 90, 100);
+    pub const Y: Self = Self::Rgb(90, 180, 120);
+    pub const Z: Self = Self::Rgb(90, 130, 200);
+
+    pub const ACTIVE: Self = Self::Rgb(140, 110, 220);
+    pub const LAST_ACTIVE: Self = Self::Rgb(90, 75, 125);
+    pub const INACTIVE: Self = Self::Rgb(60, 60, 70);
+
+    pub const EDGE: Self = Self::Rgb(80, 160, 190);
+    pub const VERTEX: Self = Self::Rgb(170, 230, 245);
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Cell {
     pub ch: char,

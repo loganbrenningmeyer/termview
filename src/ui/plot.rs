@@ -95,6 +95,15 @@ impl PaneController for PlotController {
      *   redraw after this function
      */
     fn handle_key(&mut self, key: KeyEvent) -> KeyResult {
+        if key.code == KeyCode::Char(' ') {
+            let Some(animation) = self.content.animation_mut() else {
+                return KeyResult::Ignored;
+            };
+
+            animation.playing = !animation.playing;
+            return KeyResult::Changed;
+        }
+
         match &mut self.content {
             PlotContent::TwoD(curve) => {
                 let result = self.view_2d.handle_key(key);
@@ -182,6 +191,35 @@ impl PaneController for PlotController {
                 format!("Samples        ({}, {})", self.view_3d.samples.0, self.view_3d.samples.1),
                 format!("Axes           {}", self.on_off(self.view_3d.renderer.show_axes)),
             ]
+        }
+    }
+
+    /**
+     * Tag text for top-right label
+     */
+    fn tag_text(&self) -> String {
+        // match self.active_plot_mode {
+        //     PlotMode::TwoD => format!(
+        //         "({:.1}, {:.1})→({:.1}, {:.1})",
+        //         self.view_2d.viewport.x_min, self.view_2d.viewport.y_min,
+        //         self.view_2d.viewport.x_max, self.view_2d.viewport.y_max,
+        //     ),
+        //     PlotMode::ThreeD => format!(
+        //         "({:.1}, {:.1}, {:.1})→({:.1}, {:.1}, {:.1})",
+        //         self.view_3d.viewport.x_min, self.view_3d.viewport.y_min, self.view_3d.viewport.z_min,
+        //         self.view_3d.viewport.x_max, self.view_3d.viewport.y_max, self.view_3d.viewport.z_max,
+        //     ),
+        // }
+        String::new()
+    }
+
+    /**
+     * Label text for top-left label next to number
+     */    
+    fn label_text(&self) -> String {
+        match self.active_plot_mode {
+            PlotMode::TwoD => "2D".to_string(),
+            PlotMode::ThreeD => "3D".to_string(),
         }
     }
 }

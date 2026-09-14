@@ -6,7 +6,7 @@ mod plot;
 mod waveform;
 
 pub use audio::AudioEngine;
-pub use layout::{Layout, Rect};
+pub use layout::{Layout, Rect, ResizeAxis};
 pub use pane::{
     FocusState, 
     InteractionMode, 

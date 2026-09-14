@@ -15,6 +15,10 @@ pub enum Command {
     },
     SetProjection(Projection),
     SetSamples(usize),
+    SetCycle {
+        start: f64,
+        end: f64,
+    },
 
     ShowAxes(bool),
     ShowTicks(bool),
@@ -83,19 +87,22 @@ impl Command {
                 => Self::parse_set_projection(val),
             ["dim", val] | ["set", "dim", val] 
                 => Self::parse_set_dimension(val),
-            ["samples", val] | ["set", "samples", val] 
+            ["s", val] | ["samples", val] | ["set", "samples", val] 
                 => Self::parse_set_samples(val),
             ["show", args @ ..]   => Self::parse_show(args),
 
             ["p", args @ ..]  | ["plot", args @ ..]   => Self::parse_plot(args),
-            ["p2", args @ ..] | ["plot2d", args @ ..] => Self::parse_plot2d(args),
-            ["p3", args @ ..] | ["plot3d", args @ ..] => Self::parse_plot3d(args),
+            ["p2", args @ ..] | ["plot2", args @ ..] => Self::parse_plot2d(args),
+            ["p3", args @ ..] | ["plot3", args @ ..] => Self::parse_plot3d(args),
 
             ["a", args @ ..]  | ["animate", args @ ..]   => Self::parse_animate(args),
-            ["a2", args @ ..] | ["animate2d", args @ ..] => Self::parse_animate2d(args),
-            ["a3", args @ ..] | ["animate3d", args @ ..] => Self::parse_animate3d(args),
+            ["a2", args @ ..] | ["animate2", args @ ..] => Self::parse_animate2d(args),
+            ["a3", args @ ..] | ["animate3", args @ ..] => Self::parse_animate3d(args),
 
             ["play", args @ ..] => Self::parse_play(args),
+            ["cycle", args @ ..] | ["set", "cycle", args @ ..] => {
+                Self::parse_set_cycle(args)
+            }
 
             ["pause"]  => Ok(Command::Pause),
             ["resume"] => Ok(Command::Resume),
@@ -106,6 +113,35 @@ impl Command {
             [] => Err("Empty command".into()),
             _ => Err(format!("Unknown command: {line}")),
         }
+    }
+
+    // -------------------------
+    // termview> cycle <start> <end>
+    // termview> set cycle <start> <end>
+    // -------------------------
+    fn parse_set_cycle(args: &[&str]) -> Result<Command, String> {
+        let [start, end] = args else {
+            return Err("Usage: cycle <start> <end>".into());
+        };
+
+        let start = start.parse::<f64>()
+            .map_err(|_| format!("Invalid cycle start: {start}"))?;
+
+        let end = end.parse::<f64>()
+            .map_err(|_| format!("Invalid cycle end: {end}"))?;
+
+        if !start.is_finite()
+            || !end.is_finite()
+            || end <= start
+            || !(end - start).is_finite()
+        {
+            return Err(
+                "Cycle bounds must be finite, with end greater than start \
+                and a finite span.".into()
+            );
+        }
+
+        Ok(Command::SetCycle { start, end })
     }
 
     // -------------------------

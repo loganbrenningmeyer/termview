@@ -8,10 +8,10 @@ use super::{
 };
 use crate::{
     rendering::{
-        draw_border, draw_text, draw_text_block,
-        Buffer, 
-        Color,
-    },
+        Buffer, Color, draw_border, draw_text, draw_text_block,
+    }, 
+    repl::{HORIZONTAL, TOP_LEFT_RD},
+    ui::FocusState::LastActivePane,
 };
 
 
@@ -21,25 +21,32 @@ use crate::{
  * PaneController that provides its rendering and key handling
  */
 pub struct Pane<C: PaneController> {
+    pub controller: C,
     pub title: String,
     pub area: Rect,
     pub buffer: Buffer,
     pub mode: InteractionMode,
     pub focus: FocusState,
     pub show_config: bool,
-    pub controller: C,
+    pub number: Option<usize>,
 }
 
 impl<C: PaneController> Pane<C> {
-    pub fn new(area: Rect, mode: InteractionMode, focus: FocusState, controller: C) -> Self {
+    pub fn new(
+        controller: C, 
+        area: Rect, 
+        mode: InteractionMode, 
+        focus: FocusState,
+    ) -> Self {
         Self {
+            controller,
             title: String::new(),
             area,
             buffer: Buffer::new(area.width, area.height),
             mode,
             focus,
             show_config: false,
-            controller,
+            number: None,
         }
     }
 
@@ -79,19 +86,71 @@ impl<C: PaneController> Pane<C> {
         // Draw border around pane
         draw_border(&mut self.buffer, self.focus.border_color(), true);
 
-        // Write title at top-left of pane
-        // - Drawn at (1, 0) pane-local coordinates,
-        //   buffer.blit() handles the screen offset afterward
+        // -------------------------
+        // Pane title
+        // -------------------------
         draw_text(
             &mut self.buffer,
             2,
             1,
             &self.title,
-            Color::Rgb(255, 255, 255),
+            Color::WHITE,
             true,
         );
 
-        // Show config at the top-right of pane
+        // -------------------------
+        // Pane tag
+        // -------------------------
+        let tag = self.controller.tag_text();
+
+        if !tag.is_empty() {
+            let tag_padded = format!(" {tag} ");
+
+            let x = self.buffer.width()
+                .saturating_sub(tag_padded.chars().count())
+                .saturating_sub(2) as isize;
+
+            draw_text(
+                &mut self.buffer,
+                x,
+                0,
+                &tag_padded,
+                Color::WHITE,
+                false,
+            );
+        }
+
+        // -------------------------
+        // Pane number - label
+        // -------------------------
+        if let Some(number) = self.number {
+            let label = self.controller.label_text();
+
+            let parts = [
+                (format!(" [{number}] "), self.focus.label_color()),
+                (HORIZONTAL.to_string(), Color::GRAY),
+                (format!(" {} ", label.trim()), Color::WHITE),
+            ];
+
+            let mut x = 2;
+
+            for (text, color) in parts {
+                draw_text(
+                    &mut self.buffer,
+                    x,
+                    0,
+                    &text,
+                    color,
+                    false,
+                );
+
+                x += text.chars().count() as isize;
+            }
+        }
+
+        // -------------------------
+        // Current settings
+        // -------------------------
         if self.show_config {
             let text = self.controller.config_text();
             
@@ -101,16 +160,21 @@ impl<C: PaneController> Pane<C> {
                     .map(|line| line.chars().count())
                     .max()
                 {
-                    let pane_width = self.buffer.width();
+                    let width = text_width + 2;
+                    let height = text.len() + 2;
+
+                    let x = self.buffer.width().saturating_sub(width) / 2;
+                    let y = self.buffer.height().saturating_sub(height) / 2;
                     
                     draw_text_block(
                         &mut self.buffer, 
-                        (pane_width - text_width - 4) as isize,
-                        1,
+                        x as isize,
+                        y as isize,
                         text,
-                        Color::Rgb(255, 255, 255),
+                        Color::WHITE,
                         true,
-                        "Current settings",
+                        "[ Current settings ]",
+                        "[c]",
                     );
                 }
             }
@@ -151,6 +215,7 @@ pub enum InteractionMode {
 pub enum FocusState {
     InactivePane,
     ActivePane,
+    LastActivePane,
     InactiveCommand,
     ActiveCommand,
 }
@@ -158,10 +223,19 @@ pub enum FocusState {
 impl FocusState {
     pub fn border_color(self) -> Color {
         match self {
-            Self::InactivePane => Color::Rgb(120, 120, 120),
-            Self::ActivePane => Color::Rgb(120, 120, 200),
-            Self::InactiveCommand => Color::Rgb(120, 120, 120),
-            Self::ActiveCommand => Color::Rgb(120, 120, 200),
+            Self::InactivePane => Color::INACTIVE,
+            Self::ActivePane => Color::ACTIVE,
+            Self::LastActivePane => Color::LAST_ACTIVE,
+            Self::InactiveCommand => Color::INACTIVE,
+            Self::ActiveCommand => Color::ACTIVE,
+        }
+    }
+
+    pub fn label_color(self) -> Color {
+        match self {
+            Self::InactivePane | LastActivePane => Color::LAST_ACTIVE,
+            Self::ActivePane => Color::ACTIVE,
+            _ => Color::INACTIVE,
         }
     }
 }

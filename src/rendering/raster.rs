@@ -1,18 +1,12 @@
 use super::{Buffer, Cell, Color, PlotArea2d, PlotViewport2d};
-
-const TOP_LEFT: char = '┌';
-const TOP_RIGHT: char = '┐';
-const BOTTOM_LEFT: char = '└';
-const BOTTOM_RIGHT: char = '┘';
-
-const TOP_LEFT_RD: char = '╭';
-const TOP_RIGHT_RD: char = '╮';
-const BOTTOM_LEFT_RD: char = '╰';
-const BOTTOM_RIGHT_RD: char = '╯';
-
-const HORIZONTAL: char = '─';
-const VERTICAL: char = '│';
-
+use crate::repl::{
+    HORIZONTAL,
+    VERTICAL,
+    TOP_LEFT, TOP_LEFT_RD,
+    TOP_RIGHT, TOP_RIGHT_RD,
+    BOTTOM_LEFT, BOTTOM_LEFT_RD,
+    BOTTOM_RIGHT, BOTTOM_RIGHT_RD,
+};
 
 /**
  * Draws rectangular border around buffer edges
@@ -89,6 +83,7 @@ pub fn draw_text_block(
     color: Color,
     border: bool,
     title: &str,
+    tag: &str,
 ) {
     // Determine block width / height
     let Some(width) = text
@@ -98,8 +93,8 @@ pub fn draw_text_block(
     else {
         return;
     };
-    let width = width as isize;
-    let height = text.len() as isize;
+    let width_i = width as isize;
+    let height_i = text.len() as isize;
 
     // Prepare border offset
     let (x_new, y_new) = if border {
@@ -108,13 +103,23 @@ pub fn draw_text_block(
         (x, y)
     };
 
+    // Define the text area bounds
+    let text_area = PlotArea2d {
+        left: x_new,
+        right: x_new + width_i - 1,
+        top: y_new,
+        bottom: y_new + height_i - 1,
+    };
+
     // Write each line in
     for (i, line) in text.iter().enumerate() {
+        let line_padded = format!("{:<width$}", line, width = width);
+
         draw_text(
             buffer,
-            x_new,
-            y_new + i as isize,
-            line,
+            text_area.left,
+            text_area.top + i as isize,
+            &line_padded,
             color,
             false,
         );
@@ -122,26 +127,31 @@ pub fn draw_text_block(
 
     // Draw outer border
     if border {
-        let area = PlotArea2d {
-            left: x_new,
-            right: x_new + width - 1,
-            top: y_new,
-            bottom: y_new + height - 1,
-        };
-
-        draw_border_area(buffer, area, color);
+        draw_border_area(buffer, text_area, color);
     }
 
     // Draw title at top left
     if !title.is_empty() {
         draw_text(
             buffer,
-            x_new + 1,
-            y_new - 1,
+            text_area.left + 1,
+            text_area.top - 1,
             title,
             color,
             false,
         );
+    }
+
+    // Draw tag at top right
+    if !tag.is_empty() {
+        draw_text(
+            buffer,
+            text_area.right - tag.chars().count() as isize,
+            text_area.top - 1,
+            tag,
+            color,
+            false,
+        )
     }
 }
 

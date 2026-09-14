@@ -42,15 +42,13 @@ impl PlotStyle2d {
 
 impl Default for PlotStyle2d {
     fn default() -> Self {
-        let axis_color = Color::Rgb(120, 120, 120);
-
         Self {
             point: Cell::new('@'),
             line: Cell::new('*'),
-            x_axis: Cell::new('─').with_fg(axis_color),
-            y_axis: Cell::new('│').with_fg(axis_color),
-            x_tick: Cell::new('┼').with_fg(axis_color),
-            y_tick: Cell::new('┼').with_fg(axis_color),
+            x_axis: Cell::new('─').with_fg(Color::GRAY),
+            y_axis: Cell::new('│').with_fg(Color::GRAY),
+            x_tick: Cell::new('┼').with_fg(Color::GRAY),
+            y_tick: Cell::new('┼').with_fg(Color::GRAY),
             tick_color: Color::Rgb(220, 220, 80),
             border_color: Color::Default,
         }
@@ -310,12 +308,12 @@ impl Default for PlotRenderer2d {
         Self {
             style: PlotStyle2d::default(),
             aspect: PlotAspect2d::Auto,
-            pad_width: 5,
-            pad_height: 2,
+            pad_width: 1,
+            pad_height: 0,
             show_axes: true,
             show_ticks: true,
             num_ticks: 6,
-            show_border: true,
+            show_border: false,
         }
     }
 }

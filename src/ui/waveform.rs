@@ -1,8 +1,9 @@
+use std::collections::HashMap;
 use std::sync::{
     Arc, atomic::{AtomicBool, AtomicU32},
 };
+use arc_swap::ArcSwap;
 use crossterm::event::KeyCode;
-use std::collections::HashMap;
 
 use crate::{geometry::Point, rendering::{Color, draw_text}};
 use crate::math::rangef;
@@ -35,18 +36,20 @@ impl WaveformController {
     pub fn new(waveform: Waveform) -> Result<Self, String> {
         let playback = PlaybackState::default();
 
-        let freq_atomic = Arc::new(AtomicU32::new(
+        let frequency_atomic = Arc::new(AtomicU32::new(
             (playback.frequency as f32).to_bits(),
         ));
-
+        let volume_atomic = Arc::new(AtomicU32::new(
+            playback.volume.to_bits()
+        ));
         let playing_atomic = Arc::new(AtomicBool::new(false));
 
         let amp_callback = waveform.amplitude_callback();
 
         let audio = AudioEngine::new(
-            // Temporary fixed gain until volume is wired up.
-            move |phase| amp_callback(phase).clamp(-1.0, 1.0) * 0.1,
-            freq_atomic,
+            move |phase| amp_callback(phase),
+            frequency_atomic,
+            volume_atomic,
             playing_atomic,
         )?;
 
@@ -92,7 +95,7 @@ impl WaveformController {
                 + self.playback.frequency * time_offset
             ).rem_euclid(1.0);  // loop around % 1.0 positive modulo
 
-            let amplitude = self.waveform.sample_at_phase(phase);
+            let amplitude = self.waveform.sample_at_phase(phase) * self.playback.volume;
 
             self.points.push(Point::new(
                 self.view.viewport.x_min + time_offset,
@@ -103,6 +106,15 @@ impl WaveformController {
 
     pub fn set_frequency(&self) {
         self.audio.set_frequency(self.playback.frequency as f32);
+    }
+
+    pub fn set_volume(&mut self, volume: f32) {
+        if !volume.is_finite() {
+            return;
+        }
+
+        self.playback.volume = volume.clamp(0.0, 1.0);
+        self.audio.set_volume(self.playback.volume);
     }
 }
 
@@ -116,23 +128,6 @@ impl PaneController for WaveformController {
             &self.view.viewport,
             target,
         );
-
-        // Place current frequency top-right
-        let label = format!(" {:.0} Hz ", self.playback.frequency);
-        let label_width = label.chars().count();
-
-        if target.width() > label_width + 2 {
-            let x = (target.width() - label_width - 2) as isize;
-
-            draw_text(
-                target,
-                x - 2,
-                1,
-                &label,
-                Color::Rgb(205, 205, 215),
-                true,
-            );
-        }
     }
 
     /**
@@ -163,18 +158,76 @@ impl PaneController for WaveformController {
             }
 
             // -------------------------
+            // Zoom in/out cycle range
+            // -------------------------
+            // Zoom out
+            KeyCode::Char('q') => {
+                self.waveform.set_cycle_range(
+                    self.waveform.cycle_start - 0.1, 
+                    self.waveform.cycle_end + 0.1,
+                );
+                
+
+                KeyResult::Changed
+            }
+            // Zoom in
+            KeyCode::Char('e') => {
+                self.waveform.set_cycle_range(
+                    self.waveform.cycle_start + 0.1, 
+                    self.waveform.cycle_end - 0.1,
+                );
+
+                KeyResult::Changed
+            }
+
+            // -------------------------
+            // Pan cycle range
+            // -------------------------
+            // Left
+            KeyCode::Char('a') => {
+                self.waveform.set_cycle_range(
+                    self.waveform.cycle_start - 0.1, 
+                    self.waveform.cycle_end - 0.1,
+                );
+
+                KeyResult::Changed
+            }
+            // Right
+            KeyCode::Char('d') => {
+                self.waveform.set_cycle_range(
+                    self.waveform.cycle_start + 0.1, 
+                    self.waveform.cycle_end + 0.1,
+                );
+
+                KeyResult::Changed
+            }
+
+            // -------------------------
             // Adjust frequency
             // -------------------------
-            KeyCode::Up => {
+            KeyCode::Right => {
                 self.playback.frequency += 10.0;
                 self.set_frequency();
 
                 KeyResult::Changed
             }
-            KeyCode::Down => {
+            KeyCode::Left => {
                 self.playback.frequency -= 10.0;
                 self.set_frequency();
 
+                KeyResult::Changed
+            }
+
+            // -------------------------
+            // Adjust volume
+            // -------------------------
+            KeyCode::Down => {
+                self.set_volume(self.playback.volume - 0.05);
+                KeyResult::Changed
+            }
+
+            KeyCode::Up => {
+                self.set_volume(self.playback.volume + 0.05);
                 KeyResult::Changed
             }
 
@@ -186,13 +239,69 @@ impl PaneController for WaveformController {
      * Read audio engine's recent published phase,
      * refresh waveform points and request a redraw
      */
-    fn update(&mut self, delta_s: f64) -> bool {
+    fn update(&mut self, _delta_s: f64) -> bool {
         self.set_frequency();
 
         let phase = self.audio.phase();
         self.refresh_points(phase as f64);
 
         true
+    }
+
+    /**
+     * Config text block for rendering in Pane
+     */
+    fn config_text(&self) -> Vec<String> {
+        vec![
+            format!(
+                "Time window    ({:.2}, {:.2}) ms",
+                self.view.viewport.x_min * 1000.0, 
+                self.view.viewport.x_max * 1000.0,
+            ),
+            format!(
+                "Amplitude      ({:.2}, {:.2})",
+                self.view.viewport.y_min, self.view.viewport.y_max,
+            ),
+            format!(
+                "Cycle domain   ({:.2}, {:.2})",
+                self.waveform.cycle_start, 
+                self.waveform.cycle_end,
+            ),
+            format!(
+                "Resolution     {}", self.waveform.resolution(),
+            ),
+            format!(
+                "Frequency      {:.0} Hz", self.playback.frequency,
+            ),
+            format!(
+                "Volume         {:.0}%", self.playback.volume * 100.0,
+            ),
+            format!(
+                "Period         {:.2} ms",
+                self.view.viewport.x_max - self.view.viewport.x_min 
+                / 2.0 * 1000.0,
+            ),
+        ]
+    }
+
+    /**
+     * Tag text for top-right label
+     */
+    fn tag_text(&self) -> String {
+        format!(
+            "[{:.2}, {:.2}) · {} Hz · {:.0}% vol.", 
+            self.waveform.cycle_start,
+            self.waveform.cycle_end,
+            self.playback.frequency, 
+            self.playback.volume * 100.0,
+        )
+    }
+
+    /**
+     * Label text for top-left label next to number
+     */  
+    fn label_text(&self) -> String {
+        "2D Audio".to_string()
     }
 }
 
@@ -202,10 +311,11 @@ impl PaneController for WaveformController {
  * its expression, cycle range, and waveform table
  */
 pub struct Waveform {
-    expression: TokenNode,
-    cycle_start: f64,       // start x-value of one cycle
-    cycle_end: f64,         // end x-value of one cycle
-    table: Vec<f32>,        // y-values within the cycle
+    pub expression: TokenNode,
+    pub cycle_start: f64,       // start x-value of one cycle
+    pub cycle_end: f64,         // end x-value of one cycle
+    pub table: Vec<f32>,        // y-values within the cycle
+    audio_table: Arc<ArcSwap<Vec<f32>>>,    // shared table with audio callback
 }
 
 impl Waveform {
@@ -228,6 +338,7 @@ impl Waveform {
             cycle_start,
             cycle_end,
             table: Vec::new(),
+            audio_table: Arc::new(ArcSwap::from_pointee(Vec::<f32>::new())),
         };
 
         // Rebuild table with given resolution
@@ -244,9 +355,11 @@ impl Waveform {
     pub fn amplitude_callback(
         &self,
     ) -> impl Fn(f32) -> f32 + Send + 'static + use<> {
-        let table = self.table.clone();
+        let shared_table = Arc::clone(&self.audio_table);
 
         move |phase: f32| {
+            let table = shared_table.load();
+
             if table.is_empty() || !phase.is_finite() {
                 return 0.0;
             }
@@ -308,6 +421,9 @@ impl Waveform {
 
             self.table.push(if y.is_finite() { y } else { 0.0 });
         }
+
+        // Store shared atomic table
+        self.audio_table.store(Arc::new(self.table.clone()));
     }
 
     // Number of samples per cycle
@@ -350,7 +466,7 @@ impl Default for PlaybackState {
     fn default() -> Self {
         Self {
             frequency: 440.0,
-            volume: 5.0,
+            volume: 1.0,
             playing: false,
         }
     }

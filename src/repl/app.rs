@@ -5,7 +5,15 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode},
 };
 
-use super::{Command, Session, SessionOutput};
+use super::{
+    Command, 
+    Session, 
+    SessionOutput, 
+    HELP_2D,
+    HELP_3D,
+    HELP_WAVEFORM,
+    HELP_COMMANDS,
+};
 use crate::{
     ui::{
         ContentController,
@@ -18,21 +26,12 @@ use crate::{
         PlotController,
         PlotMode,
         Rect,
+        ResizeAxis,
         PaneController,
     },
-    rendering::{Color, draw_text},
+    rendering::{Buffer, Color, draw_text, draw_text_block},
     terminal::{self as term, TerminalPresenter},
 };
-
-
-const HELP_2D: &str =
-    "[↑↓←→/wasd] Pan │ [e] Zoom in │ [q] Zoom out │ [esc] Focus prompt ";
-
-const HELP_3D: &str =
-    "[↑↓←→/wasd] Orbit │ [e] Zoom in │ [q] Zoom out │ [r] Reset camera │ [esc] Focus prompt";
-
-const HELP_WAVEFORM: &str =
-    "[↑/↓] Frequency up/down │ [space] Play/pause │ [esc] Focus prompt";
 
 
 #[derive(Debug, PartialEq, Eq)]
@@ -59,6 +58,7 @@ enum CommandKeyResult {
 enum CommandEffect {
     None,
     Redraw,
+    RedrawKeepFocus,
     Quit,
 }
 
@@ -79,6 +79,7 @@ pub struct TermviewApp {
     input_mode: InputMode,
     command: String,
     message: Option<String>,
+    show_help: bool,
 }
 
 impl TermviewApp {
@@ -90,19 +91,19 @@ impl TermviewApp {
             session: Session,
             presenter: TerminalPresenter::new(width, height),
             command_pane: Pane::new(
+                CommandController { text: String::new() },
                 Rect::new(0, 0, 0, 0),
                 InteractionMode::Static,
                 FocusState::InactiveCommand,
-                CommandController { text: String::new() },
             ),
             command_cursor: 0,
             panes: HashMap::from([(
                 0,
                 Pane::new(
+                    ContentController::Plot(PlotController::default()),
                     area, 
                     InteractionMode::Static, 
                     FocusState::ActivePane,
-                    ContentController::Plot(PlotController::default()),
                 ),
             )]),
             active_pane: 0,
@@ -111,6 +112,7 @@ impl TermviewApp {
             input_mode: InputMode::Pane,
             command: String::new(),
             message: None,
+            show_help: false,
         }
     }
 
@@ -132,7 +134,7 @@ impl TermviewApp {
         match self.apply_command(command)? {
             CommandEffect::Quit => Ok(AppControl::Quit),
 
-            CommandEffect::Redraw => {
+            CommandEffect::Redraw | CommandEffect::RedrawKeepFocus => {
                 Ok(self.show_view(output)?)
             }
 
@@ -157,19 +159,32 @@ impl TermviewApp {
     ) -> Result<CommandEffect, Box<dyn std::error::Error>> {
         self.message = None;
 
-        if matches!(command, Command::Quit) {
-            return Ok(CommandEffect::Quit);
-        }
-
         let pane = self.panes
             .get_mut(&self.active_pane)
             .ok_or_else(|| io::Error::other("Active pane does not exist"))?;
 
-        let result = self.session.execute(&mut pane.controller, command)?;
+        // Quit termview
+        if matches!(command, Command::Quit) {
+            return Ok(CommandEffect::Quit);
+        }
+
+        // Help overlay
+        if matches!(command, Command::Help) {
+            self.show_help = !self.show_help;
+            return Ok(CommandEffect::Redraw);
+        }
+
+        // Current config overlay
+        if matches!(command, Command::Config) {
+            pane.show_config = !pane.show_config;
+            return Ok(CommandEffect::Redraw);
+        }
 
         // -------------------------
         // Execute parsed Command with Session
         // -------------------------
+        let result = self.session.execute(&mut pane.controller, command)?;
+
         match result {
             SessionOutput::None => Ok(CommandEffect::None),
 
@@ -235,14 +250,22 @@ impl TermviewApp {
             ContentController::Waveform(_) => HELP_WAVEFORM,
         };
 
+        let pane_ids = self.ordered_pane_ids();
         let frame = self.presenter.begin_frame();
 
         // Render panes / set pane focus
-        for (&id, pane) in self.panes.iter_mut() {
-            let focus = if !typing && id == self.active_pane {
-                FocusState::ActivePane
-            } else {
+        for (index, id) in pane_ids.into_iter().enumerate() {
+            // Set pane display number 1-indexed by ordered ID
+            let pane = self.panes.get_mut(&id)
+                .expect("Pane ID came from the pane map");
+            pane.number = Some(index + 1);
+
+            let focus = if id != self.active_pane {
                 FocusState::InactivePane
+            } else if typing {
+                FocusState::LastActivePane
+            } else {
+                FocusState::ActivePane
             };
 
             pane.set_focus(focus);
@@ -251,7 +274,7 @@ impl TermviewApp {
 
         self.command_pane.render_into(frame);
 
-        // Draw app-wide help after the panes
+        // Draw app-wide keyboard help after the panes
         if frame.height() > 0 {
             let y = (frame.height() - 4) as isize;
 
@@ -266,9 +289,45 @@ impl TermviewApp {
                 x, 
                 y, 
                 help_text, 
-                Color::Rgb(255, 255, 255), 
+                Color::WHITE, 
                 false
             );
+        }
+
+        // Show command help overlay in center of frame
+        if self.show_help {
+            let lines: Vec<String> = HELP_COMMANDS
+                .trim_matches('\n')
+                .lines()
+                .map(|line| line.trim_end().to_string())
+                .collect();
+
+            let text_width = lines
+                .iter()
+                .map(|line| line.chars().count())
+                .max()
+                .unwrap_or(0);
+
+            let width = text_width + 2;
+            let height = lines.len() + 2;
+
+            let mut overlay = Buffer::new(width, height);
+
+            draw_text_block(
+                &mut overlay,
+                0,
+                0,
+                lines,
+                Color::WHITE,
+                true,
+                "[ Help ]",
+                "[h]",
+            );
+
+            let x = frame.width().saturating_sub(width) / 2;
+            let y = frame.height().saturating_sub(height) / 2;
+
+            frame.blit(&overlay, x, y);
         }
 
         self.presenter.present(output)
@@ -420,7 +479,7 @@ impl TermviewApp {
                                             self.command_cursor = 0;
                                         }
 
-                                        Ok(CommandEffect::None) => {
+                                        Ok(CommandEffect::None | CommandEffect::RedrawKeepFocus) => {
                                             self.command.clear();
                                             self.command_cursor = 0;
                                         }
@@ -449,43 +508,58 @@ impl TermviewApp {
                     }
 
                     // -------------------------
-                    // Enter Command mode from Pane mode
+                    // Pane mode
                     // -------------------------
-                    if key.code == KeyCode::Char(':') {
-                        self.input_mode = InputMode::Command;
-                        self.command.clear();
-                        self.command_cursor = 0;
-                        self.message = None;
-
-                        self.present(output)?;
-                        continue;
-                    }
-
-                    // -------------------------
-                    // Next active pane
-                    // -------------------------
-                    if key.code == KeyCode::Tab {
-                        if self.panes.len() > 1 {
-                            self.next_pane()?;
-                        // One pane: switch to command pane
-                        } else {
+                    match key.code {
+                        // Enter command mode
+                        KeyCode::Char(':') | KeyCode::Char('x') => {
                             self.input_mode = InputMode::Command;
                             self.command.clear();
                             self.command_cursor = 0;
                             self.message = None;
-                            self.get_active_pane()?.set_focus(FocusState::InactivePane);
+        
+                            self.present(output)?;
+                            continue;
                         }
 
-                        self.present(output)?;
-                        continue
-                    }
+                        // Show help overlay
+                        KeyCode::Char('h') | KeyCode::Char('?') => {
+                            self.show_help = !self.show_help;
+                            self.present(output)?;
+                            continue; 
+                        }
 
-                    // -------------------------
-                    // Split pane / Delete pane
-                    // -------------------------
-                    match key.code {
+                        // Go to pane by number [1..9]
+                        KeyCode::Char(c @ '1'..='9') => {
+                            let number = (c as u8 - b'0') as usize;
+
+                            if let Some(id) = self.pane_id_for_number(number) {
+                                self.active_pane = id;
+                                self.present(output)?;
+                            }
+
+                            continue;
+                        }
+
+                        // Next active pane
+                        KeyCode::Tab => {
+                            if self.panes.len() > 1 {
+                                self.next_pane()?;
+                            // One pane: switch to command pane
+                            } else {
+                                self.input_mode = InputMode::Command;
+                                self.command.clear();
+                                self.command_cursor = 0;
+                                self.message = None;
+                                self.get_active_pane()?.set_focus(FocusState::LastActivePane);
+                            }
+        
+                            self.present(output)?;
+                            continue
+                        }
+
                         // Column split
-                        KeyCode::Char('\\') => {
+                        KeyCode::Char('%') => {
                             self.split_active_pane(SplitDirection::Columns)?;
 
                             self.present(output)?;
@@ -493,10 +567,28 @@ impl TermviewApp {
                         }
 
                         // Row split
-                        KeyCode::Char('-') => {
+                        KeyCode::Char('"') => {
                             self.split_active_pane(SplitDirection::Rows)?;
 
                             self.present(output)?;
+                            continue;
+                        }
+
+                        // -------------------------
+                        // Resize pane
+                        // -------------------------
+                        KeyCode::Char(c @ ('j' | 'l' | 'i' | 'k')) => {
+                            let (axis, amount) = match c {
+                                'j' => (ResizeAxis::Horizontal, -0.05),
+                                'l' => (ResizeAxis::Horizontal,  0.05),
+                                'i' => (ResizeAxis::Vertical,   -0.05),
+                                'k' => (ResizeAxis::Vertical,    0.05),
+                                _ => unreachable!(),
+                            };
+
+                            if self.resize_active_pane(axis, amount) {
+                                self.present(output)?;
+                            }
                             continue;
                         }
 
@@ -653,6 +745,24 @@ impl TermviewApp {
     }
 
     /**
+     * Resize active pane by adjusting its first sibling's fraction,
+     * relayout adjusts the children accordingly
+     */
+    fn resize_active_pane(
+        &mut self, 
+        axis: ResizeAxis,
+        amount: f32,
+    ) -> bool {
+        if !self.layout.resize_pane(self.active_pane, axis, amount) {
+            return false;
+        }
+
+        let (width, height) = term::canvas_dims();
+        self.relayout(width, height);
+        true
+    }
+
+    /**
      * Splits the active pane vertically (Columns) or horizontally (Rows),
      * updates the active pane with the replacement split Layout in the tree 
      * and updates its size to the new split size
@@ -706,10 +816,10 @@ impl TermviewApp {
         self.panes.insert(
             next_id,
             Pane::new(
+                ContentController::Plot(PlotController::default()),
                 next_area,
                 InteractionMode::Static,
                 FocusState::ActivePane,
-                ContentController::Plot(PlotController::default()),
             ),
         );
 
@@ -724,16 +834,15 @@ impl TermviewApp {
      * Set active pane to next pane ID in Panes HashMap indices
      */
     fn next_pane(&mut self) -> io::Result<()> {
-        let mut pane_indices: Vec<usize> = self.panes.keys().copied().collect();
-        pane_indices.sort_unstable();
+        let pane_ids = self.ordered_pane_ids();
 
         // Get active pand ID's HashMap index
-        let active_idx = pane_indices.iter()
+        let active_idx = pane_ids.iter()
             .position(|&id| id == self.active_pane)
             .ok_or_else(|| io::Error::other("Active pane does not exist"))?;
 
         self.get_active_pane()?.set_focus(FocusState::InactivePane);    // Current -> Inactive
-        self.active_pane = pane_indices[(active_idx + 1) % pane_indices.len()];
+        self.active_pane = pane_ids[(active_idx + 1) % pane_ids.len()];
         self.get_active_pane()?.set_focus(FocusState::ActivePane);      // Next -> Active
 
         Ok(())
@@ -775,6 +884,24 @@ impl TermviewApp {
         self.panes
             .get_mut(&self.active_pane)
             .ok_or_else(|| io::Error::other("Active pane does not exist").into())
+    }
+
+    /**
+     * Get Pane IDs in sorted order
+     */
+    fn ordered_pane_ids(&self) -> Vec<usize> {
+        let mut ids: Vec<_> = self.panes.keys().copied().collect();
+        ids.sort_unstable();
+        ids
+    }
+
+    /**
+     * Given displayed Pane number (1, 2, 3, ...), get
+     * the corresponding index in internal ordered Pane IDs
+     */
+    fn pane_id_for_number(&self, number: usize) -> Option<usize> {
+        let index = number.checked_sub(1)?;
+        self.ordered_pane_ids().get(index).copied()
     }
 }
 

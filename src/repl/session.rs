@@ -232,9 +232,6 @@ impl Session {
             // -------------------------
             // General commands
             // -------------------------
-            Command::Help => {
-                Ok(SessionOutput::Message(Self::help_text()))
-            }
             Command::Quit => Ok(SessionOutput::None),
 
             // -------------------------
@@ -284,6 +281,15 @@ impl Session {
         command: Command,
     ) -> Result<SessionOutput, String> {
         match command {
+            Command::SetCycle { start, end } => {
+                controller.waveform.set_cycle_range(start, end);
+
+                let phase = controller.audio.phase();
+                controller.refresh_points(phase as f64);
+
+                Ok(SessionOutput::Redraw)
+            }
+
             Command::Pause => {
                 controller.playback.playing = false;
                 Ok(SessionOutput::Redraw)
@@ -319,7 +325,7 @@ impl Session {
     ) -> Result<SessionOutput, String> {
         match command {
             // -------------------------
-            // Plot / Plot2d / Plot3d / Replot
+            // Require Replotting
             // -------------------------
             Command::Plot(expression) => {
                 self.replace_plot(
@@ -359,6 +365,28 @@ impl Session {
                     return Ok(SessionOutput::Message(
                         "This pane has no previous plot".into(),
                     ));
+                };
+
+                self.replace_plot(
+                    plot_controller,
+                    last.expression,
+                    last.mode,
+                    last.animated,
+                )
+            }
+
+            Command::SetSamples(samples) => {
+                if samples < 2 {
+                    return Ok(SessionOutput::Message("samples must be at least 2".into()));
+                }
+
+                match plot_controller.active_plot_mode {
+                    PlotMode::TwoD => plot_controller.view_2d.samples = samples,
+                    PlotMode::ThreeD => plot_controller.view_3d.samples = (samples, samples),
+                }
+                
+                let Some(last) = plot_controller.last_plot.clone() else {
+                    return Ok(SessionOutput::None);
                 };
 
                 self.replace_plot(
@@ -506,25 +534,13 @@ impl Session {
                     }
                 }
 
-                Ok(SessionOutput::None)
+                Ok(SessionOutput::Redraw)
             }
 
             Command::SetProjection(proj) => {
                 plot_controller.view_3d.camera.projection = proj;
 
-                Ok(SessionOutput::None)
-            }
-
-            Command::SetSamples(samples) => {
-                if samples < 2 {
-                    return Ok(SessionOutput::Message("samples must be at least 2".into()));
-                }
-
-                match plot_controller.active_plot_mode {
-                    PlotMode::TwoD => plot_controller.view_2d.samples = samples,
-                    PlotMode::ThreeD => plot_controller.view_3d.samples = (samples, samples),
-                }
-                Ok(SessionOutput::None)
+                Ok(SessionOutput::Redraw)
             }
 
             Command::ShowAxes(show) => {
@@ -532,7 +548,7 @@ impl Session {
                     PlotMode::TwoD => plot_controller.view_2d.renderer.show_axes = show,
                     PlotMode::ThreeD => plot_controller.view_2d.renderer.show_axes = show,
                 }
-                Ok(SessionOutput::None)
+                Ok(SessionOutput::Redraw)
             }
             
             Command::ShowTicks(show) => {
@@ -543,7 +559,7 @@ impl Session {
                         plot_controller.view_3d.renderer.axes_renderer.show_labels = show;
                     }
                 }
-                Ok(SessionOutput::None)
+                Ok(SessionOutput::Redraw)
             }
 
             Command::ShowBorder(show) => {
@@ -551,145 +567,21 @@ impl Session {
                     PlotMode::TwoD => plot_controller.view_2d.renderer.show_border = show,
                     PlotMode::ThreeD => plot_controller.view_3d.renderer.show_border = show,
                 }
-                Ok(SessionOutput::None)
-            }
-
-            Command::Config => {
-                Ok(SessionOutput::Message(
-                    self.config_text(plot_controller)
-                ))
-            }
-
-            Command::Help => {
-                Ok(SessionOutput::Message(
-                    Self::help_text()
-                ))
+                Ok(SessionOutput::Redraw)
             }
 
             Command::Quit => {
                 Ok(SessionOutput::None)
             }
 
+            // -------------------------
+            // Non-plot pane commands
+            // -------------------------
+            Command::SetCycle { .. } => {
+                Err("Cycle range can only be set on a waveform pane.".into())
+            }
+
             _ => Ok(SessionOutput::None)
         }
     }
-
-    /**
-     * Print current PlotViewport / PlotRenderer configuration
-     */
-    fn config_text(&self, plot_controller: &PlotController) -> String {
-        let viewport_2d = &plot_controller.view_2d.viewport;
-        let renderer_2d = &plot_controller.view_2d.renderer;
-        let samples_2d = plot_controller.view_2d.samples;
-
-        let viewport_3d = &plot_controller.view_3d.viewport;
-        let renderer_3d = &plot_controller.view_3d.renderer;
-        let samples_3d = plot_controller.view_3d.samples;
-        let camera_3d = &plot_controller.view_3d.camera;
-
-        let active_settings = match plot_controller.active_plot_mode {
-            PlotMode::TwoD => format!(
-            r#"
-Current settings
-  Dimension          2D
-  View               ({}, {}) to ({}, {})
-  Projection (3D)    {}
-  Samples            {}
-  Axes               {}
-  Ticks              {}
-  Border             {}
-"#,
-            viewport_2d.x_min,
-            viewport_2d.y_min,
-            viewport_2d.x_max,
-            viewport_2d.y_max,
-            camera_3d.projection,
-            samples_2d,
-            on_off(renderer_2d.show_axes),
-            on_off(renderer_2d.show_ticks),
-            on_off(renderer_2d.show_border),
-            ),
-            PlotMode::ThreeD => format!(
-            r#"
-Current settings
-  Dimension          3D
-  View               ({}, {}, {}) to ({}, {}, {})
-  Projection (3D)    {}
-  Samples            {} x {}
-  Axes               {}
-  Ticks              {}
-  Border             {}
-"#,
-                viewport_3d.x_min,
-                viewport_3d.y_min,
-                viewport_3d.z_min,
-                viewport_3d.x_max,
-                viewport_3d.y_max,
-                viewport_3d.z_max,
-                camera_3d.projection,
-                samples_3d.0,
-                samples_3d.1,
-                on_off(renderer_3d.show_axes),
-                on_off(renderer_3d.axes_renderer.show_ticks),
-                on_off(renderer_3d.show_border),
-            ),
-        };
-
-        active_settings
-    }
-
-    /**
-     * Print list of available commands
-     */
-    fn help_text() -> String {
-        return 
-            r#"
-==============================
-      Termview commands 
-==============================
-
-  plot <expression>                             Plot using the active dimension
-  plot3d <expression>                           Plot a function of x and y, and switch to 3D
-  replot                                        Plot the last expression again
-
-  set dim <2|3>                                 Set the active plot dimension
-
-  set view <xmin> <xmax> <ymin> <ymax>          Set the visible coordinate range
-  set view (<xmin>, <xmax>) (<ymin>, <ymax>)
-  set view <xmin> <xmax> <ymin> <ymax> <zmin> <zmax>
-
-  set proj <p|o>                                Set the 3D projection method 
-  set proj <perspective|orthographic>
-
-  set samples <count>                           Set the number of sampled points
-
-  show axes <true|false|1|0>                    Show or hide the axes
-  show ticks <true|false|1|0>                   Show or hide ticks and labels
-  show border <true|false|1|0>                  Show or hide the plot border
-  
-  [C] | cfg | config                            Display the current plotting configuration
-  [H] | help                                    Display this help
-
-  [Q] | quit | exit                             Exit termview
-
-==============================
-        Plot Controls 
-==============================
-
-  [↑] [←] [↓] [→]                               Rotate camera [UP] [DOWN] [LEFT] [RIGHT]
-  [W] [A] [S] [D] 
-
-  [Q] [E]                                       Zoom [in] [out]
-
-  [R]                                           Reset camera view
-
-  [X] | [Esc] | [Enter]                         Exit plot                                     
-
-=========================
-"#.to_string();
-    }
-}
-
-fn on_off(value: bool) -> &'static str {
-    if value { "on" } else { "off" }
 }

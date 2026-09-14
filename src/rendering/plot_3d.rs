@@ -49,11 +49,11 @@ impl Default for PlotStyle3d {
     fn default() -> Self {
         Self {
             surface: WireframeStyle {
-                edge: Cell::new('•').with_fg(Color::Rgb(80, 160, 190)),
-                vertex: Cell::new('●').with_fg(Color::Rgb(170, 230, 245)),
+                edge: Cell::new('•').with_fg(Color::EDGE),
+                vertex: Cell::new('●').with_fg(Color::VERTEX),
             },
             axes: AxesStyle3d::default(),
-            border: Color::Rgb(160, 160, 160),
+            border: Color::GRAY,
         }
     }
 }
