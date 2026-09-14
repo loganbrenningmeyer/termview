@@ -284,33 +284,6 @@ impl PlotRenderer2d {
         (area.width() >= 0 && area.height() >= 0).then_some(area)
     }
 
-    /**
-     * Map 2D point coordinates to buffer coordinates
-     */
-    fn project(
-        &self,
-        point: Point,
-        viewport: &PlotViewport2d,
-        area: PlotArea2d,
-    ) -> Option<(isize, isize)> {
-        let x_range = viewport.x_max - viewport.x_min;
-        let y_range = viewport.y_max - viewport.y_min;
-
-        if x_range.abs() <= f64::EPSILON || y_range.abs() <= f64::EPSILON {
-            return None;
-        }
-
-        // Normalize point [0, 1] within viewport
-        let x_norm = (point.x - viewport.x_min) / x_range;
-        let y_norm = (point.y - viewport.y_min) / y_range;
-
-        // Map normalized point into the shared padded plot area.
-        let x_screen = area.left as f64 + x_norm * area.width() as f64;
-        let y_screen = area.top as f64 + (1.0 - y_norm) * area.height() as f64;
-
-        Some((x_screen.round() as isize, y_screen.round() as isize))
-    }
-
     fn project_braille(
         &self,
         point: Point,
