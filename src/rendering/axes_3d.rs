@@ -8,13 +8,25 @@ use crate::{
 
 #[derive(Debug, Clone, Copy)]
 struct AxisSpec {
-    direction: Vec3,
+    start: Vec3,
+    end: Vec3,
     min: f64,
     max: f64,
     label: char,
     style: WireframeStyle,
     tick_style: Cell,
     label_style: Cell,
+}
+
+impl AxisSpec {
+    /**
+     * Get the (x,y,z) point at the given
+     * axis value, interpolating between its start / end points
+     */
+    fn point_at(&self, value: f64) -> Vec3 {
+        let t = (value - self.min) / (self.max - self.min);
+        self.start + (self.end - self.start) * t
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -50,7 +62,7 @@ impl Default for AxesStyle3d {
                 edge: Cell::new('·').with_fg(Color::Z),
                 vertex: Cell::new('•').with_fg(Color::Z),
             },
-            tick: Cell::new('.').with_fg(Color::GRAY),
+            tick: Cell::new('.').with_fg(Color::WHITE),
             label: Cell::new(' ').with_fg(Color::WHITE),
         }
     }
@@ -61,8 +73,8 @@ impl Default for AxesRenderer3d {
         Self {
             show_ticks: true,
             show_labels: true,
-            ticks_per_axis: 3,
-            tick_radius: 0.75,
+            ticks_per_axis: 6,
+            tick_radius: 1.5,
             label_gap: 1.0,
         }
     }
@@ -106,13 +118,29 @@ impl AxesRenderer3d {
         );
     }
 
+    /**
+     * Defines the X, Y, and Z axis information
+     * given the data viewport range and style settings
+     * - X: start=(xmin, ymin, zmin), end=(xmax, ymin, zmin)
+     * - Y: start=(xmin, ymin, zmin), end=(xmin, ymax, zmin)
+     * - Z: start=(xmin, ymin, zmin), end=(xmin, ymin, zmax)
+     */
     fn axis_specs(
         viewport: &PlotViewport3d, 
         style: AxesStyle3d
     ) -> [AxisSpec; 3] {
         [
             AxisSpec {
-                direction: Vec3::X,
+                start: Vec3::new(
+                    viewport.x_min,
+                    viewport.y_min,
+                    viewport.z_min,
+                ),
+                end: Vec3::new(
+                    viewport.x_max,
+                    viewport.y_min,
+                    viewport.z_min,
+                ),
                 min: viewport.x_min,
                 max: viewport.x_max,
                 label: 'X',
@@ -121,7 +149,16 @@ impl AxesRenderer3d {
                 label_style: style.label,
             },
             AxisSpec {
-                direction: Vec3::Y,
+                start: Vec3::new(
+                    viewport.x_min,
+                    viewport.y_min,
+                    viewport.z_min,
+                ),
+                end: Vec3::new(
+                    viewport.x_min,
+                    viewport.y_max,
+                    viewport.z_min,
+                ),
                 min: viewport.y_min,
                 max: viewport.y_max,
                 label: 'Y',
@@ -130,7 +167,16 @@ impl AxesRenderer3d {
                 label_style: style.label,
             },
             AxisSpec {
-                direction: Vec3::Z,
+                start: Vec3::new(
+                    viewport.x_min,
+                    viewport.y_min,
+                    viewport.z_min,
+                ),
+                end: Vec3::new(
+                    viewport.x_min,
+                    viewport.y_min,
+                    viewport.z_max,
+                ),
                 min: viewport.z_min,
                 max: viewport.z_max,
                 label: 'Z',
@@ -152,9 +198,7 @@ impl AxesRenderer3d {
         braille: &mut BrailleBuffer,
     ) {
         for (index, axis) in Self::axis_specs(viewport, style).into_iter().enumerate() {
-            let start = axis.direction * axis.min;
-            let end = axis.direction * axis.max;
-            let mesh = self.make_axis(start, end);
+            let mesh = self.make_axis(axis.start, axis.end);
 
             wireframe.render_braille_into(
                 &mesh,
@@ -177,15 +221,20 @@ impl AxesRenderer3d {
         style: AxesStyle3d,
         buffer: &mut Buffer,
     ) {
-        let mut origin_label_drawn = false;
+        // Compute viewport box center for orthogonal ticks
+        let box_center = Vec3::new(
+            (viewport.x_min + viewport.x_max) * 0.5,
+            (viewport.y_min + viewport.y_max) * 0.5,
+            (viewport.z_min + viewport.z_max) * 0.5,
+        );
 
         for axis in Self::axis_specs(viewport, style) {
             self.render_axis_annotations(
                 wireframe,
-                axis,
                 transform,
                 camera,
-                &mut origin_label_drawn,
+                axis,
+                box_center,
                 buffer,
             );
         }
@@ -194,19 +243,19 @@ impl AxesRenderer3d {
     fn render_axis_annotations(
         &self,
         wireframe: &WireframeRenderer,
-        axis: AxisSpec,
         transform: Transform,
         camera: &Camera,
-        origin_label_drawn: &mut bool,
+        axis: AxisSpec,
+        box_center: Vec3,
         buffer: &mut Buffer,
     ) {
         if self.show_ticks || self.show_labels {
             self.render_ticks_labels(
                 wireframe,
-                axis,
                 transform,
                 camera,
-                origin_label_drawn,
+                axis,
+                box_center,
                 buffer,
             );
         }
@@ -246,18 +295,19 @@ impl AxesRenderer3d {
     fn render_ticks_labels(
         &self,
         wireframe: &WireframeRenderer,
-        axis: AxisSpec,
         transform: Transform,
         camera: &Camera,
-        origin_label_drawn: &mut bool,
+        axis: AxisSpec,
+        box_center: Vec3,
         buffer: &mut Buffer,
     ) {
         // Project start/end points and find perpendicular screen direction
         let Some((orth_x, orth_y)) = self.axis_orth_proj(
             wireframe, 
-            axis, 
             transform, 
             camera, 
+            axis,
+            box_center, 
             buffer
         ) else {
             return;
@@ -270,7 +320,7 @@ impl AxesRenderer3d {
             self.ticks_per_axis,
         ) {
             // Tick value along axis is flat axis dir * value
-            let anchor_3d = axis.direction * value;
+            let anchor_3d = axis.point_at(value);
 
             let Some(anchor) = wireframe.project_object_point(
                 anchor_3d,
@@ -283,11 +333,10 @@ impl AxesRenderer3d {
 
             // Draw tick lines
             if self.show_ticks {
-                // Define tick endpoints centered along anchor in 
-                // perpendicular direction, and with tick radius 
-                let x0 = anchor.x - (orth_x * self.tick_radius).round() as isize;
-                let y0 = anchor.y - (orth_y * self.tick_radius).round() as isize;
-    
+                // Define tick endpoints centered/perpendicular to anchor, extending outward
+                let x0 = anchor.x;
+                let y0 = anchor.y;
+
                 let x1 = anchor.x + (orth_x * self.tick_radius).round() as isize;
                 let y1 = anchor.y + (orth_y * self.tick_radius).round() as isize;
     
@@ -304,7 +353,7 @@ impl AxesRenderer3d {
             // Draw tick value as text label
             let is_origin = value.abs() < 1e-10;
 
-            if self.show_labels && (!is_origin || !*origin_label_drawn) {
+            if self.show_labels {
                 let text = if is_origin {
                     "0".to_string()
                 } else {
@@ -329,10 +378,6 @@ impl AxesRenderer3d {
                     axis.label_style.fg,
                     false
                 );
-
-                if is_origin {
-                    *origin_label_drawn = true;
-                }
             }
         }
     }
@@ -368,18 +413,15 @@ impl AxesRenderer3d {
         camera: &Camera,
         buffer: &mut Buffer,
     ) {
-        let start_3d = axis.direction * axis.min;
-        let end_3d = axis.direction * axis.max;
-
         let (Some(start), Some(end)) = (
             wireframe.project_object_point(
-                start_3d,
+                axis.start,
                 transform,
                 camera,
                 buffer,
             ),
             wireframe.project_object_point(
-                end_3d,
+                axis.end,
                 transform,
                 camera,
                 buffer,
@@ -439,56 +481,63 @@ impl AxesRenderer3d {
     }
 
     /**
-     * Determine perpendicular direction to axis in screen space,
+     * Determine perpendicular direction to axis from box center in screen space,
      * allows for placing ticks perpendicular out of the axis in the render
      */
     fn axis_orth_proj(
         &self,
         wireframe: &WireframeRenderer,
-        axis: AxisSpec,
         transform: Transform,
         camera: &Camera,
+        axis: AxisSpec,
+        box_center: Vec3,
         buffer: &mut Buffer,
     ) -> Option<(f64, f64)> {
-        let start_3d = axis.direction * axis.min;
-        let end_3d = axis.direction * axis.max;
-
         let start = wireframe.project_object_point(
-            start_3d,
-            transform,
-            camera,
-            buffer,
+            axis.start, transform, camera, buffer,
         )?;
 
         let end = wireframe.project_object_point(
-            end_3d,
-            transform,
-            camera,
-            buffer,
+            axis.end, transform, camera, buffer,
         )?;
 
-        let dx = (end.x - start.x) as f64;
-        let dy = (end.y - start.y) as f64;
+        let center = wireframe.project_object_point(
+            box_center, transform, camera, buffer,
+        )?;
 
-        // Find the perpendicular in physical screen proportions. A raw
-        // row/column perpendicular looks skewed because cells are not square.
+        // Express direction in physical screen proportions
         let cell_aspect = buffer.cell_aspect();
-        let dx_display = dx * cell_aspect;
-        let length = dx_display.hypot(dy);
+        let dx = (end.x - start.x) as f64 * cell_aspect;
+        let dy = (end.y - start.y) as f64;
+        let length = dx.hypot(dy);
 
         if length <= f64::EPSILON {
             return None;
         }
 
-        // Convert the physical-screen perpendicular back into cell offsets.
-        let mut orth_x = (-dy / length) / cell_aspect;
-        let mut orth_y = dx_display / length;
+        // Unit perpendiculars to the projected axis
+        let mut normal_x = -dy / length;
+        let mut normal_y = dx / length;
 
-        if orth_y < 0.0 {
-            orth_x = -orth_x;
-            orth_y = -orth_y;
+        // Midpoint of the projected axis, in terminal coordinates
+        let midpoint_x = (start.x as f64 + end.x as f64) * 0.5;
+        let midpoint_y = (start.y as f64 + end.y as f64) * 0.5;
+
+        // Direction from viewport box center toward the axis
+        let outward_x =
+            (midpoint_x - center.x as f64) * cell_aspect;
+        let outward_y =
+            midpoint_y - center.y as f64;
+
+        // Negative dot product means the normal points inward, so flip
+        let dot = normal_x * outward_x + normal_y * outward_y;
+
+        if dot < 0.0 {
+            normal_x = -normal_x;
+            normal_y = -normal_y;
         }
 
-        Some((orth_x, orth_y))
+        // Convert back to column/row offsets for drawing
+        Some((normal_x / cell_aspect, normal_y))
     }
 }

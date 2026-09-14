@@ -13,6 +13,11 @@ pub enum Command {
         y_max: f64,
         z_bounds: Option<(f64, f64)>,
     },
+    SetViewAxis {
+        axis: char,
+        min: f64,
+        max: f64,
+    },
     SetProjection(Projection),
     SetSamples(usize),
     SetCycle {
@@ -20,9 +25,8 @@ pub enum Command {
         end: f64,
     },
 
-    ShowAxes(bool),
-    ShowTicks(bool),
-    ShowBorder(bool),
+    ShowAxes(Option<bool>),     // None toggles
+    ShowTicks(Option<bool>),
 
     Plot(String),
     Plot2d(String),
@@ -222,21 +226,21 @@ impl Command {
     }
 
     // -------------------------
-    // termview> show axes <0, 1>
-    // termview> show border <0, 1>
-    // termview> show ticks <0, 1>
+    // termview> show axes [0, 1]
+    // termview> show ticks [0, 1]
+    // - No value toggles the current setting
     // -------------------------
     fn parse_show(args: &[&str]) -> Result<Command, String> {
-        // Validate / extract two arguments
+        // Validate / extract element and optional value
         let (arg, val) = match args {
-            [arg, val] => (*arg, *val),
+            [arg] => (*arg, None),
+            [arg, val] => (*arg, Some(*val)),
             _ => {
                 return Err(format!(
                     r#"Expected one of:
 
-        termview> show axes <0, 1>
-        termview> show border <0, 1>
-        termview> show ticks <0, 1>"#
+        termview> show axes [0, 1]
+        termview> show ticks [0, 1]"#
                 )
                 .into());
             }
@@ -245,11 +249,15 @@ impl Command {
         // Enum tuple variants can be used as functions. Selecting the
         // constructor here both validates the element and avoids matching
         // the same string a second time below.
-        let command: fn(bool) -> Command = match arg {
+        let command: fn(Option<bool>) -> Command = match arg {
             "axes" => Command::ShowAxes,
-            "border" => Command::ShowBorder,
             "ticks" => Command::ShowTicks,
             _ => return Err(format!("Unknown command: show {arg}")),
+        };
+
+        // No value: toggle
+        let Some(val) = val else {
+            return Ok(command(None));
         };
 
         let show = match val.to_lowercase().as_str() {
@@ -266,7 +274,7 @@ impl Command {
             }
         };
 
-        Ok(command(show))
+        Ok(command(Some(show)))
     }
 
     // -------------------------
@@ -293,8 +301,14 @@ impl Command {
     // -------------------------
     // termview> set view <x_min x_max y_min y_max>
     // termview> set view <(x_min, x_max) (y_min, y_max)>
+    // termview> set view <x, y, z> <min max>
     // -------------------------
     fn parse_set_view(args: &[&str]) -> Result<Command, String> {
+        // Single axis: view <x, y, z> <min max>
+        if let [axis @ ("x" | "y" | "z"), rest @ ..] = args {
+            return Self::parse_set_view_axis(axis, rest);
+        }
+
         // Turn punctuation into whitespace.
         let normalized = args.join(" ")
                              .replace(['(', ')', ','], " ");
@@ -323,7 +337,9 @@ impl Command {
     termview> set view x_min x_max y_min y_max z_min z_max
 
     termview> set view (x_min, x_max) (y_min, y_max)
-    termview> set view (x_min, x_max) (y_min, y_max) (z_min, z_max)"#
+    termview> set view (x_min, x_max) (y_min, y_max) (z_min, z_max)
+
+    termview> set view <x, y, z> min max"#
                         .into(),
                 );
             }
@@ -335,6 +351,32 @@ impl Command {
             y_min,
             y_max,
             z_bounds,
+        })
+    }
+
+    // -------------------------
+    // termview> set view <x, y, z> <min max>
+    // termview> set view <x, y, z> <(min, max)>
+    // -------------------------
+    fn parse_set_view_axis(axis: &str, args: &[&str]) -> Result<Command, String> {
+        // Turn punctuation into whitespace.
+        let normalized = args.join(" ")
+                             .replace(['(', ')', ','], " ");
+
+        let [min, max] = normalized.split_whitespace().collect::<Vec<_>>()[..] else {
+            return Err(format!("Usage: view {axis} <min> <max>"));
+        };
+
+        let min = min.parse::<f64>()
+            .map_err(|_| format!("Invalid {axis}_min: {min}"))?;
+
+        let max = max.parse::<f64>()
+            .map_err(|_| format!("Invalid {axis}_max: {max}"))?;
+
+        Ok(Command::SetViewAxis {
+            axis: axis.chars().next().unwrap(),
+            min,
+            max,
         })
     }
 

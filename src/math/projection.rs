@@ -21,6 +21,13 @@ impl Projection {
             Projection::Orthographic(o) => o.near,
         }
     }
+
+    pub fn fov_y(&self) -> f64 {
+        match self {
+            Projection::Perspective(p) => p.fov_y,
+            Projection::Orthographic(_) => 0.0,
+        }
+    }
 }
 
 impl Default for Projection {

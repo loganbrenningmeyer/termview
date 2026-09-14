@@ -92,8 +92,8 @@ impl Camera {
 
         // The camera looks down local -Z, so placing it along its rotated
         // local +Z keeps it looking toward the origin.
-        self.position =
-            rotation.rotate_vec3(Vec3::Z * self.orbit.distance);
+        self.position = self.orbit.target
+            + rotation.rotate_vec3(Vec3::Z * self.orbit.distance);
     }
 
     /**
@@ -162,6 +162,7 @@ pub struct CameraOrbit {
     pub azimuth: f64,
     pub elevation: f64,
     pub distance: f64,
+    pub target: Vec3,   // The point the camera looks at / rotates around
 }
 
 impl Default for CameraOrbit {
@@ -170,6 +171,7 @@ impl Default for CameraOrbit {
             azimuth: 45.0,
             elevation: 25.0,
             distance: 10.0,
+            target: Vec3::ZERO,
         }
     }
 }

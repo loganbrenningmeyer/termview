@@ -5,7 +5,7 @@ use std::sync::{
 use arc_swap::ArcSwap;
 use crossterm::event::KeyCode;
 
-use crate::{geometry::Point, rendering::{Color, draw_text}};
+use crate::geometry::Point;
 use crate::math::rangef;
 use crate::parsing::TokenNode;
 use super::{

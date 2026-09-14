@@ -10,7 +10,7 @@ use crate::{
     rendering::{
         Buffer, Color, draw_border, draw_text, draw_text_block,
     }, 
-    repl::{HORIZONTAL, TOP_LEFT_RD},
+    repl::HORIZONTAL,
     ui::FocusState::LastActivePane,
 };
 
@@ -87,11 +87,15 @@ impl<C: PaneController> Pane<C> {
         draw_border(&mut self.buffer, self.focus.border_color(), true);
 
         // -------------------------
-        // Pane title
+        // Pane title (top-right)
         // -------------------------
+        let title_x = self.buffer.width()
+            .saturating_sub(self.title.chars().count())
+            .saturating_sub(4) as isize;
+
         draw_text(
             &mut self.buffer,
-            2,
+            title_x,
             1,
             &self.title,
             Color::WHITE,
@@ -99,7 +103,7 @@ impl<C: PaneController> Pane<C> {
         );
 
         // -------------------------
-        // Pane tag
+        // Pane tag (top-right)
         // -------------------------
         let tag = self.controller.tag_text();
 
@@ -121,7 +125,7 @@ impl<C: PaneController> Pane<C> {
         }
 
         // -------------------------
-        // Pane number - label
+        // Pane number - label (top-left)
         // -------------------------
         if let Some(number) = self.number {
             let label = self.controller.label_text();

@@ -1,4 +1,4 @@
-use super::{Buffer, Cell, Color, PlotArea2d, PlotViewport2d};
+use super::{Buffer, Cell, Color, PlotArea2d};
 use crate::repl::{
     HORIZONTAL,
     VERTICAL,
@@ -47,7 +47,7 @@ pub fn draw_border(buffer: &mut Buffer, color: Color, round: bool) {
 /**
  * 
  */
-fn draw_text_in_area(
+pub fn draw_text_in_area(
     buffer: &mut Buffer,
     area: PlotArea2d,
     x: isize,
@@ -263,101 +263,6 @@ pub fn draw_text(
             y_new,
             Cell { ch, fg: color },
         );
-    }
-}
-
-/**
- * 
- */
-pub fn draw_axes_ticks(
-    buffer: &mut Buffer,
-    viewport: &PlotViewport2d,
-    area: PlotArea2d,
-    origin_x: isize,
-    origin_y: isize,
-    tick_x: Cell,
-    tick_y: Cell,
-    num_ticks: usize,
-    color: Color,
-) {
-    if num_ticks < 2 {
-        return;
-    }
-
-    let x_range = viewport.x_max - viewport.x_min;
-    let y_range = viewport.y_max - viewport.y_min;
-
-    // X-ticks
-    for i in 0..num_ticks {
-        let t = i as f64 / (num_ticks - 1) as f64;
-
-        let x_col = area.left + (t * area.width() as f64).round() as isize;
-
-        let value = viewport.x_min + t * x_range;
-        let label = format!("{value:.2}");
-
-        // Center the label beneath its tick
-        let label_width = isize::try_from(label.chars().count()).unwrap_or(0);
-
-        let max_label_x = (area.right - label_width + 1).max(area.left);
-        let label_x = (x_col - label_width / 2).clamp(area.left, max_label_x);
-        let label_y = (origin_y + 1).clamp(area.top, area.bottom);
-
-        draw_text_in_area(buffer, area, label_x, label_y, &label, color);
-
-        buffer.set(x_col, origin_y, tick_x);
-    }
-
-    // Y-ticks
-    for i in 0..num_ticks {
-        let t = i as f64 / (num_ticks - 1) as f64;
-
-        let y_row = area.top + (t * area.height() as f64).round() as isize;
-
-        let value = viewport.y_max - t * y_range;
-        let label = format!("{value:.2}");
-
-        // Put to the left of the axis
-        let label_width = isize::try_from(label.chars().count()).unwrap_or(0);
-        let max_label_x = (area.right - label_width + 1).max(area.left);
-        let label_x = (origin_x - label_width - 1).clamp(area.left, max_label_x);
-
-        draw_text_in_area(buffer, area, label_x, y_row, &label, color);
-
-        buffer.set(origin_x, y_row, tick_y);
-    }
-
-    // Draw origin label
-    let origin_label_x = (origin_x - 1).clamp(area.left, area.right);
-    let origin_label_y = (origin_y + 1).clamp(area.top, area.bottom);
-    buffer.set(
-        origin_label_x,
-        origin_label_y,
-        Cell::new('0').with_fg(color),
-    );
-}
-
-/**
- * 
- */
-pub fn draw_axes_2d(
-    buffer: &mut Buffer,
-    area: PlotArea2d,
-    origin_x: isize,
-    origin_y: isize,
-    cell_x: Cell,
-    cell_y: Cell,
-) {
-    if (area.top..=area.bottom).contains(&origin_y) {
-        for x in area.left..=area.right {
-            buffer.set(x, origin_y, cell_x);
-        }
-    }
-
-    if (area.left..=area.right).contains(&origin_x) {
-        for y in area.top..=area.bottom {
-            buffer.set(origin_x, y, cell_y);
-        }
     }
 }
 

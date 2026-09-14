@@ -1,6 +1,8 @@
 use super::{BrailleBuffer, Buffer, Cell, Color};
 use super::{draw_axes_2d, draw_axes_ticks, draw_border};
 use crate::geometry::Point;
+use crate::math::rangef;
+
 
 #[derive(Debug, Clone, Copy)]
 pub struct PlotStyle2d {
@@ -12,6 +14,7 @@ pub struct PlotStyle2d {
     pub y_tick: Cell,
     pub tick_color: Color,
     pub border_color: Color,
+    pub guide_color: Color,
 }
 
 impl PlotStyle2d {
@@ -43,14 +46,15 @@ impl PlotStyle2d {
 impl Default for PlotStyle2d {
     fn default() -> Self {
         Self {
-            point: Cell::new('@'),
-            line: Cell::new('*'),
+            point: Cell::new('@').with_fg(Color::VERTEX),
+            line: Cell::new('*').with_fg(Color::EDGE),
             x_axis: Cell::new('─').with_fg(Color::GRAY),
             y_axis: Cell::new('│').with_fg(Color::GRAY),
-            x_tick: Cell::new('┼').with_fg(Color::GRAY),
-            y_tick: Cell::new('┼').with_fg(Color::GRAY),
-            tick_color: Color::Rgb(220, 220, 80),
+            x_tick: Cell::new('┬').with_fg(Color::GRAY),
+            y_tick: Cell::new('┤').with_fg(Color::GRAY),
+            tick_color: Color::WHITE,
             border_color: Color::Default,
+            guide_color: Color::LIGHT_GRAY,
         }
     }
 }
@@ -138,6 +142,13 @@ impl Default for PlotViewport2d {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct PlotLayout2d {
+    pub data: PlotArea2d,   // Only curves go here.
+    pub x_axis_y: isize,
+    pub y_axis_x: isize,
+}
+
 
 #[derive(Debug, Clone)]
 pub struct PlotRenderer2d {
@@ -162,20 +173,48 @@ impl PlotRenderer2d {
         viewport: &PlotViewport2d, 
         buffer: &mut Buffer
     ) {
-        let Some(mut area) = self.plot_area(buffer) else {
+        let Some(outer) = self.plot_area(buffer) else {
             return;
         };
 
-        if let PlotAspect2d::Equal { cell_aspect } = self.aspect {
-            area = area.fit_equal_aspect(viewport, cell_aspect);
+        // -------------------------
+        // Define plot area for axes / datapoints
+        // -------------------------
+        let max_y_label_width = self.max_y_label_width(viewport);
+
+        let mut data_area = PlotArea2d {
+            left: outer.left + max_y_label_width + 2,
+            right: outer.right,
+            top: outer.top,
+            bottom: outer.bottom - 2,
+        };
+
+        // Guard against too small plot areas
+        if data_area.width() <= 0 || data_area.height() <= 0 {
+            return;
         }
 
+        if let PlotAspect2d::Equal { cell_aspect } = self.aspect {
+            data_area = data_area.fit_equal_aspect(viewport, cell_aspect);
+        }
+
+        let layout = PlotLayout2d {
+            x_axis_y: data_area.bottom + 1,
+            y_axis_x: data_area.left - 1,
+            data: data_area,
+        };
+
+        // -------------------------
+        // Render points in 2x4 braille subpixel grid
+        // -------------------------
         let mut braille = BrailleBuffer::new(buffer.width(), buffer.height());
 
-        // Project points onto the 2x4 subpixel grid.
-        let projected: Vec<_> = points
+        // Project points onto braille buffer
+        let projected: Vec<(isize, isize)> = points
             .iter()
-            .filter_map(|&point| self.project_braille(point, viewport, area))
+            .filter_map(|&point| {
+                self.project_braille(point, viewport, data_area)
+            })
             .collect();
 
         // Draw lines between points
@@ -191,40 +230,37 @@ impl PlotRenderer2d {
             braille.set(x, y, self.style.point.fg);
         }
 
-        braille.composite(buffer);
-
         // Draw x/y axes
         if self.show_axes {
-            let origin = Point::new(0.0, 0.0);
-            if let Some((origin_x, origin_y)) = self.project(origin, viewport, area) {
-                draw_axes_2d(
-                    buffer,
-                    area,
-                    origin_x,
-                    origin_y,
-                    self.style.x_axis,
-                    self.style.y_axis,
-                );
-            }
+            draw_axes_2d(
+                buffer,
+                &layout,
+                self.style.x_axis,
+                self.style.y_axis,
+            );
         }
 
         // Draw x/y tick labels
         if self.show_ticks {
-            let origin = Point::new(0.0, 0.0);
-            if let Some((origin_x, origin_y)) = self.project(origin, viewport, area) {
-                draw_axes_ticks(
-                    buffer,
-                    viewport,
-                    area,
-                    origin_x,
-                    origin_y,
-                    self.style.x_tick,
-                    self.style.y_tick,
-                    self.num_ticks,
-                    self.style.tick_color,
-                );
-            }
+            draw_axes_ticks(
+                buffer,
+                viewport,
+                &layout,
+                outer,
+                self.style.x_tick,
+                self.style.y_tick,
+                self.num_ticks,
+                self.style.tick_color,
+            );
         }
+
+        // Draw zero guidelines
+        if self.show_axes {
+            self.draw_zero_lines(buffer, viewport, data_area);
+        }
+
+        // Composite curve sampled points onto buffer
+        braille.composite(buffer);
 
         // Draw border
         if self.show_border {
@@ -301,6 +337,76 @@ impl PlotRenderer2d {
 
         Some((x_screen.round() as isize, y_screen.round() as isize))
     }
+
+    /**
+     * Draw dotted lines through the origin onto the target buffer
+     */
+    fn draw_zero_lines(
+        &self,
+        buffer: &mut Buffer,
+        viewport: &PlotViewport2d,
+        area: PlotArea2d,
+    ) {
+        // Ignore if origin is offscreen
+        let Some((zero_x, zero_y)) =
+            self.project_braille(Point::new(0.0, 0.0), viewport, area)
+        else {
+            return;
+        };
+
+        // Create zero lines onto new braille buffer of same size as target
+        let mut guides = BrailleBuffer::new(
+            buffer.width(), 
+            buffer.height()
+        );
+
+        // Convert plot area to braille
+        let left = area.left * 2;
+        let right = (area.right + 1) * 2 - 1;
+        let top = area.top * 4;
+        let bottom = (area.bottom + 1) * 4 - 1;
+
+        // Horizontal zero-guide (y=0)
+        if viewport.y_min <= 0.0 && viewport.y_max >= 0.0 {
+            for x in (left..=right).step_by(4) {
+                guides.set(x, zero_y, Color::LIGHT_GRAY);
+            }
+        }
+
+        // Vertical zero-guide (x=0)
+        if viewport.x_min <= 0.0 && viewport.x_max >= 0.0 {
+            for y in (top..=bottom).step_by(4) {
+                guides.set(zero_x, y, Color::LIGHT_GRAY);
+            }
+        }
+
+        // Composite guides buffer onto target buffer
+        guides.composite(buffer);
+    }
+
+    /**
+     * Get widest y-axis label width given the viewport/renderer settings
+     */
+    fn max_y_label_width(&self, viewport: &PlotViewport2d) -> isize {
+        if self.show_ticks && self.num_ticks >= 2 {
+            let ticks = rangef(
+                viewport.y_min, 
+                viewport.y_max, 
+                self.num_ticks, 
+                true
+            );
+
+            ticks
+                .iter()
+                .map(|val| {
+                    format!("{val:.2}").chars().count()
+                })
+                .max()
+                .unwrap_or(0) as isize
+        } else {
+            0
+        }
+    }
 }
 
 impl Default for PlotRenderer2d {
@@ -308,8 +414,8 @@ impl Default for PlotRenderer2d {
         Self {
             style: PlotStyle2d::default(),
             aspect: PlotAspect2d::Auto,
-            pad_width: 1,
-            pad_height: 0,
+            pad_width: 2,
+            pad_height: 2,
             show_axes: true,
             show_ticks: true,
             num_ticks: 6,

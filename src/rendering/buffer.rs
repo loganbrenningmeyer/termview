@@ -12,6 +12,7 @@ impl Color {
     pub const BLUE: Self = Self::Rgb(0, 0, 255);
     pub const YELLOW: Self = Self::Rgb(255, 255, 0);
     pub const GRAY: Self = Self::Rgb(120, 120, 120);
+    pub const LIGHT_GRAY: Self = Self::Rgb(60, 60, 60);
 
     pub const X: Self = Self::Rgb(190, 90, 100);
     pub const Y: Self = Self::Rgb(90, 180, 120);

@@ -23,6 +23,7 @@ use crate::{
         KeyResult,
         Layout,
         Pane,
+        PlotContent,
         PlotController,
         PlotMode,
         Rect,
@@ -58,7 +59,6 @@ enum CommandKeyResult {
 enum CommandEffect {
     None,
     Redraw,
-    RedrawKeepFocus,
     Quit,
 }
 
@@ -78,6 +78,9 @@ pub struct TermviewApp {
     layout: Layout,
     input_mode: InputMode,
     command: String,
+    history: Vec<String>,
+    history_index: Option<usize>,
+    draft: String,
     message: Option<String>,
     show_help: bool,
 }
@@ -111,6 +114,9 @@ impl TermviewApp {
             layout: Layout::Leaf { pane_id: 0 },
             input_mode: InputMode::Pane,
             command: String::new(),
+            history: Vec::new(),
+            history_index: None,
+            draft: String::new(),
             message: None,
             show_help: false,
         }
@@ -134,7 +140,7 @@ impl TermviewApp {
         match self.apply_command(command)? {
             CommandEffect::Quit => Ok(AppControl::Quit),
 
-            CommandEffect::Redraw | CommandEffect::RedrawKeepFocus => {
+            CommandEffect::Redraw => {
                 Ok(self.show_view(output)?)
             }
 
@@ -183,12 +189,38 @@ impl TermviewApp {
         // -------------------------
         // Execute parsed Command with Session
         // -------------------------
+        let projection_changed = matches!(&command, Command::SetProjection(_));
+        let viewport_3d_changed = matches!(
+            &command,
+            Command::SetView {
+                z_bounds: Some(_),
+                ..
+            } | Command::SetViewAxis { .. }
+        );
+
         let result = self.session.execute(&mut pane.controller, command)?;
 
         match result {
             SessionOutput::None => Ok(CommandEffect::None),
 
-            SessionOutput::Redraw => Ok(CommandEffect::Redraw),
+            SessionOutput::Redraw => {
+                if projection_changed || viewport_3d_changed {
+                    if let ContentController::Plot(plot) = &mut pane.controller {
+                        if let PlotContent::ThreeD(surface) = &mut plot.content {
+                            if viewport_3d_changed {
+                                surface.rebuild_mesh(&plot.view_3d);
+                                plot.view_3d.reset_camera();
+                            }
+
+                            if pane.buffer.width() >= 3 && pane.buffer.height() >= 3 {
+                                plot.view_3d.fit_camera(&pane.buffer, &surface.mesh.vertices);
+                            }
+                        }
+                    }
+                }
+
+                Ok(CommandEffect::Redraw)
+            }
 
             SessionOutput::Message(msg) => {
                 self.message = Some(msg);
@@ -198,6 +230,33 @@ impl TermviewApp {
             SessionOutput::PaneUpdated { title } => {
                 pane.set_title(title);
                 pane.mode = InteractionMode::Interactive;
+
+                if let ContentController::Plot(plot) = &mut pane.controller {
+                    match &mut plot.content {
+                        PlotContent::TwoD(curve) => {
+                            plot.view_2d.reset_view();
+
+                            // Prepare displayed frames with reset X bounds
+                            curve.resample(&plot.view_2d);
+
+                            // Fit across the cycle, static curves use existing points
+                            curve.fit_animation_view(&mut plot.view_2d, 129);
+                        }
+
+                        PlotContent::ThreeD(surface) => {
+                            // Rebuild mesh around default view then fit viewport
+                            plot.view_3d.reset_view();
+                            surface.rebuild_mesh(&plot.view_3d);
+                            plot.view_3d.fit_view(&surface.mesh.vertices);
+
+                            // Fit camera to newly fit viewport bounds
+                            plot.view_3d.reset_camera();
+                            plot.view_3d.fit_camera(&pane.buffer, &surface.mesh.vertices);
+                        }
+
+                        PlotContent::Empty => {}
+                    }
+                }
 
                 Ok(CommandEffect::Redraw)
             }
@@ -468,6 +527,14 @@ impl TermviewApp {
                                     self.input_mode = InputMode::Pane;
                                     self.command.clear();
                                 } else {
+                                    // Save to history before running so failed
+                                    // commands can be recalled, skip repeats
+                                    let entry = self.command.trim().to_string();
+
+                                    if self.history.last() != Some(&entry) {
+                                        self.history.push(entry);
+                                    }
+
                                     match self.submit_command() {
                                         Ok(CommandEffect::Quit) => {
                                             return Ok(AppControl::Quit);
@@ -479,7 +546,7 @@ impl TermviewApp {
                                             self.command_cursor = 0;
                                         }
 
-                                        Ok(CommandEffect::None | CommandEffect::RedrawKeepFocus) => {
+                                        Ok(CommandEffect::None) => {
                                             self.command.clear();
                                             self.command_cursor = 0;
                                         }
@@ -608,6 +675,19 @@ impl TermviewApp {
                     // -------------------------
                     let pane = self.get_active_pane()?;
                     let result = pane.handle_key(key);
+
+                    // Reset camera by fitting to viewport
+                    if key.code == KeyCode::Char('r')
+                        && result == KeyResult::Changed
+                        && pane.buffer.width() >= 3
+                        && pane.buffer.height() >= 3
+                    {
+                        if let ContentController::Plot(plot) = &mut pane.controller {
+                            if let PlotContent::ThreeD(surface) = &plot.content {
+                                plot.view_3d.fit_camera(&pane.buffer, &surface.mesh.vertices);
+                            }
+                        }
+                    }
                     
                     match result {
                         KeyResult::Changed => {
@@ -642,6 +722,12 @@ impl TermviewApp {
                 if (c.is_ascii_alphanumeric()
                     || matches!(c, '+' | '-' | '*' | '/' | '^' | '(' | ')' | ' ' | '.' | '=')) => 
             {
+                // Typing over a message starts a fresh command
+                if self.message.take().is_some() {
+                    self.command.clear();
+                    self.command_cursor = 0;
+                }
+
                 self.command.insert(self.command_cursor, c);
                 self.command_cursor += 1;
                 CommandKeyResult::Changed
@@ -652,6 +738,10 @@ impl TermviewApp {
                 self.input_mode = InputMode::Pane;
                 CommandKeyResult::Changed
             }
+
+            // Up / Down: Step through command history
+            KeyCode::Up => self.recall_history(true),
+            KeyCode::Down => self.recall_history(false),
 
             // Left / Right: Move cursor
             KeyCode::Left => {
@@ -707,6 +797,38 @@ impl TermviewApp {
 
             _ => CommandKeyResult::Ignored,
         }
+    }
+
+    /**
+     * Step to an older / newer submitted command
+     * - Browsing only continues while the text still matches the
+     *   recalled entry, so any edit or clear starts a new draft
+     * - Stepping past the newest entry restores the draft
+     */
+    fn recall_history(&mut self, older: bool) -> CommandKeyResult {
+        let browsing = self.history_index
+            .filter(|&i| self.history.get(i) == Some(&self.command));
+
+        let index = match (browsing, older) {
+            (None, true) if !self.history.is_empty() => {
+                self.draft = self.command.clone();
+                Some(self.history.len() - 1)
+            }
+            (None, _) => return CommandKeyResult::Ignored,
+
+            (Some(i), true) => Some(i.saturating_sub(1)),
+            (Some(i), false) if i + 1 < self.history.len() => Some(i + 1),
+            (Some(_), false) => None,
+        };
+
+        self.history_index = index;
+        self.command = match index {
+            Some(i) => self.history[i].clone(),
+            None => std::mem::take(&mut self.draft),
+        };
+        self.command_cursor = self.command.len();
+
+        CommandKeyResult::Changed
     }
 
     /**

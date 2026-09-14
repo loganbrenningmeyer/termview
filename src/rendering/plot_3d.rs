@@ -80,7 +80,10 @@ impl PlotRenderer3d {
         buffer: &mut Buffer,
     ) {
         let display_aspect = buffer.display_aspect();
-        let mut braille = BrailleBuffer::new(buffer.width(), buffer.height());
+        let mut braille = BrailleBuffer::new(
+            buffer.width(), 
+            buffer.height()
+        );
 
         self.surface_renderer.render_braille_into(
             mesh,
@@ -91,6 +94,9 @@ impl PlotRenderer3d {
             0,
             &mut braille,
         );
+
+        // Get surface-occupied spans in each row
+        let surface_spans = braille.row_spans();
 
         if self.show_axes {
             self.axes_renderer.render_lines_braille(
@@ -104,18 +110,47 @@ impl PlotRenderer3d {
             );
         }
 
-        braille.composite(buffer);
-
         if self.show_axes {
+            // Build annotations buffer with all annotations
+            let mut annotations = Buffer::new(
+                buffer.width(),
+                buffer.height(),
+            );
+
             self.axes_renderer.render_annotations(
                 &self.surface_renderer,
                 viewport,
                 transform,
                 camera,
                 self.style.axes,
-                buffer,
+                &mut annotations,
             );
+
+            // Erase all annotations behind the surface spans
+            for (y, span) in surface_spans.iter().enumerate() {
+                for x in 0..buffer.width() {
+                    // Determine if x-cell falls within the surface row span
+                    // if so, don't render the annotation
+                    let covered = match span {
+                        Some((left, right)) => x >= *left && x <= *right,
+                        None => false,
+                    };
+
+                    if covered {
+                        continue;
+                    }
+
+                    let cell = annotations.get(x, y);
+
+                    // Only set uncovered, non-empty annotation cells
+                    if cell.ch != ' ' {
+                        buffer.set(x as isize, y as isize, cell);
+                    }
+                }
+            }
         }
+
+        braille.composite(buffer);
 
         if self.show_border {
             draw_border(buffer, self.style.border, true);

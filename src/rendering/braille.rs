@@ -59,6 +59,25 @@ impl BrailleBuffer {
         self.set_depth(x, y, 0.0, 0, color);
     }
 
+    /**
+     * Get occupied horizontal span per terminal row
+     */
+    pub fn row_spans(&self) -> Vec<Option<(usize, usize)>> {
+        let mut spans = Vec::with_capacity(self.cell_height);
+
+        for y in 0..self.cell_height {
+            let start = y * self.cell_width;
+            let row = &self.cells[start..start + self.cell_width];
+
+            let left = row.iter().position(|cell| cell.dots != 0);
+            let right = row.iter().rposition(|cell| cell.dots != 0);
+
+            spans.push(left.zip(right));
+        }
+
+        spans
+    }
+
     pub fn set_depth(
         &mut self,
         x: isize,
@@ -170,6 +189,9 @@ impl BrailleBuffer {
         }
     }
 
+    /**
+     * Composite own braille cells onto the target buffer
+     */
     pub fn composite(&self, buffer: &mut Buffer) {
         for y in 0..self.cell_height {
             for x in 0..self.cell_width {

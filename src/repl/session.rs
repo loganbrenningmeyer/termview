@@ -301,7 +301,8 @@ impl Session {
             }
 
             Command::ShowAxes(show) => {
-                controller.view.renderer.show_axes = show;
+                let show_axes = &mut controller.view.renderer.show_axes;
+                *show_axes = show.unwrap_or(!*show_axes);
                 Ok(SessionOutput::Redraw)
             }
 
@@ -537,35 +538,64 @@ impl Session {
                 Ok(SessionOutput::Redraw)
             }
 
+            Command::SetViewAxis { axis, min, max } => {
+                if min >= max {
+                    return Ok(SessionOutput::Message(format!("{axis}_min must be less than {axis}_max")));
+                }
+
+                let view_2d = &mut plot_controller.view_2d.viewport;
+                let view_3d = &mut plot_controller.view_3d.viewport;
+
+                let (lower, upper) = match (plot_controller.active_plot_mode, axis) {
+                    (PlotMode::TwoD, 'x') => (&mut view_2d.x_min, &mut view_2d.x_max),
+                    (PlotMode::TwoD, 'y') => (&mut view_2d.y_min, &mut view_2d.y_max),
+                    (PlotMode::TwoD, _) => {
+                        return Ok(SessionOutput::Message("2D view has no z axis".into()));
+                    }
+                    (PlotMode::ThreeD, 'x') => (&mut view_3d.x_min, &mut view_3d.x_max),
+                    (PlotMode::ThreeD, 'y') => (&mut view_3d.y_min, &mut view_3d.y_max),
+                    (PlotMode::ThreeD, _) => (&mut view_3d.z_min, &mut view_3d.z_max),
+                };
+
+                *lower = min;
+                *upper = max;
+
+                // New x-range needs new y-values
+                if plot_controller.active_plot_mode == PlotMode::TwoD {
+                    plot_controller.resample();
+                }
+
+                Ok(SessionOutput::Redraw)
+            }
+
             Command::SetProjection(proj) => {
                 plot_controller.view_3d.camera.projection = proj;
 
                 Ok(SessionOutput::Redraw)
             }
 
+            // None toggles the current setting
             Command::ShowAxes(show) => {
-                match plot_controller.active_plot_mode {
-                    PlotMode::TwoD => plot_controller.view_2d.renderer.show_axes = show,
-                    PlotMode::ThreeD => plot_controller.view_2d.renderer.show_axes = show,
-                }
-                Ok(SessionOutput::Redraw)
-            }
-            
-            Command::ShowTicks(show) => {
-                match plot_controller.active_plot_mode {
-                    PlotMode::TwoD => plot_controller.view_2d.renderer.show_ticks = show,
-                    PlotMode::ThreeD => {
-                        plot_controller.view_3d.renderer.axes_renderer.show_ticks = show;
-                        plot_controller.view_3d.renderer.axes_renderer.show_labels = show;
-                    }
-                }
+                let show_axes = match plot_controller.active_plot_mode {
+                    PlotMode::TwoD => &mut plot_controller.view_2d.renderer.show_axes,
+                    PlotMode::ThreeD => &mut plot_controller.view_3d.renderer.show_axes,
+                };
+                *show_axes = show.unwrap_or(!*show_axes);
                 Ok(SessionOutput::Redraw)
             }
 
-            Command::ShowBorder(show) => {
+            Command::ShowTicks(show) => {
                 match plot_controller.active_plot_mode {
-                    PlotMode::TwoD => plot_controller.view_2d.renderer.show_border = show,
-                    PlotMode::ThreeD => plot_controller.view_3d.renderer.show_border = show,
+                    PlotMode::TwoD => {
+                        let show_ticks = &mut plot_controller.view_2d.renderer.show_ticks;
+                        *show_ticks = show.unwrap_or(!*show_ticks);
+                    }
+                    PlotMode::ThreeD => {
+                        let axes = &mut plot_controller.view_3d.renderer.axes_renderer;
+                        let show = show.unwrap_or(!axes.show_ticks);
+                        axes.show_ticks = show;
+                        axes.show_labels = show;
+                    }
                 }
                 Ok(SessionOutput::Redraw)
             }

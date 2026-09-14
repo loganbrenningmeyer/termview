@@ -36,9 +36,10 @@ proj <p,o>                              Set 3D projection method
                                         (Perspective, Orthographic)
 view <x1> <x2> <y1> <y2>                Set visible coordinate range
 view <x1> <x2> <y1> <y2> <z1> <z2>
+view <x,y,z> <min> <max>                Set one axis range
 samples <count>                         Set number of sampled points
-show axes <0,1>                         Toggle axes visibility
-show ticks <0,1>                        Toggle ticks / labels visibility
+show axes [0,1]                         Toggle axes visibility
+show ticks [0,1]                        Toggle ticks / labels visibility
 ────────────────────────────────────────────────────────────────────────
 a | animate <expression>                Plot animation
                                         - Expr. must use time (t)
